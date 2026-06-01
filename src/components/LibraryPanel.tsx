@@ -213,7 +213,10 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
                   <summary className="cursor-pointer text-sm font-medium text-[var(--app-fg)]">
                     Story info
                   </summary>
-                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                  {/* <pre className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    {selected.meta.summary || "No summary available."}
+                  </pre> */}
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)] h-fit max-h-[220px] overflow-y-auto break-all scroll-hidden whitespace-pre-line">
                     {selected.meta.summary || "No summary available."}
                   </p>
                 </details>
