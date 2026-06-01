@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { findAdapter } from '../core/sources';
+import { findAdapter, getSourceInfo } from '../core/sources';
 import { ensureNovelDir, writeJsonFile } from '../core/storage/fsAdapter';
-import { saveNovelMetadata } from '../core/storage/indexeddb';
+import { listNovelsMetadata, saveNovelMetadata } from '../core/storage/indexeddb';
 import { useLibraryStore } from '../stores/libraryStore';
 import { DownloadQueue, type DownloadJob } from '../core/jobs/downloadQueue';
 import { toSafeId } from '../core/reader/content';
+import BookCover from './BookCover';
 
 type Preview = {
   novelId: string;
@@ -23,6 +24,7 @@ export default function CrawlerPanel() {
   const [showLog, setShowLog] = useState(false);
   const [maxChapters, setMaxChapters] = useState(0);
   const [adapterUrl, setAdapterUrl] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
   const downloadRef = useRef<DownloadQueue | null>(null);
 
   useEffect(() => {
@@ -38,6 +40,17 @@ export default function CrawlerPanel() {
       setDownloads((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
     );
     downloadRef.current = dq;
+    listNovelsMetadata()
+      .then((rows: any) =>
+        setHistory(
+          [...((rows as any[]) || [])].sort(
+            (a, b) =>
+              new Date(b.lastCrawledAt || 0).getTime() -
+              new Date(a.lastCrawledAt || 0).getTime(),
+          ),
+        ),
+      )
+      .catch(() => {});
   }, []);
 
   const handlePreview = async () => {
@@ -60,6 +73,7 @@ export default function CrawlerPanel() {
       const novelId = toSafeId(meta.title || targetUrl, `novel_${Date.now()}`);
       const enrichedMeta = {
         ...meta,
+        ...getSourceInfo(targetUrl, adapter),
         id: novelId,
         url: targetUrl,
         chapterCount: meta.chapterCount || chapters.length,
@@ -85,6 +99,10 @@ export default function CrawlerPanel() {
       await writeJsonFile(`${dir}/metadata.json`, data.meta);
     } catch (e) {}
     await useLibraryStore.getState().addNovel(data.meta);
+    setHistory((items) => [
+      data.meta,
+      ...items.filter((item) => item.id !== data.meta.id),
+    ]);
   };
 
   const handleCrawl = async () => {
@@ -138,16 +156,17 @@ export default function CrawlerPanel() {
   const latestDownloads = useMemo(() => downloads.slice(-8).reverse(), [downloads]);
 
   return (
-    <div className="surface-panel">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="panel-kicker">Advanced</p>
-          <h2 className="panel-title">Crawl a novel</h2>
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="surface-panel">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="panel-kicker">Crawler</p>
+            <h2 className="panel-title">New crawl or update</h2>
+          </div>
+          <button className="ghost-button" onClick={() => setUrl(SAMPLE_URL)}>
+            Use WikiCV sample
+          </button>
         </div>
-        <button className="ghost-button" onClick={() => setUrl(SAMPLE_URL)}>
-          Use WikiCV sample
-        </button>
-      </div>
 
       <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_auto]">
         <input
@@ -169,31 +188,25 @@ export default function CrawlerPanel() {
 
       {preview && (
         <div className="mt-4 grid gap-4 lg:grid-cols-[220px_1fr]">
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-            {preview.meta.cover ? (
-              <img
-                src={preview.meta.cover}
-                alt=""
-                className="h-64 w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-64 items-center justify-center text-4xl font-semibold text-slate-300">
-                {preview.meta.title?.slice(0, 1)}
-              </div>
-            )}
+          <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)]">
+            <BookCover
+              title={preview.meta.title}
+              meta={preview.meta}
+              className="h-64 w-full object-cover"
+            />
           </div>
 
           <div className="min-w-0">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <h3 className="truncate text-xl font-semibold text-slate-950">
+                <h3 className="truncate text-xl font-semibold text-[var(--app-fg)]">
                   {preview.meta.title}
                 </h3>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-[var(--muted)]">
                   {preview.meta.author || 'Unknown author'} ·{' '}
                   {preview.meta.status || 'Unknown status'}
                 </p>
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-[var(--muted)]">
                   {preview.meta.chapterCount || preview.chapters.length} chapters
                   {preview.meta.latestChapter
                     ? ` · latest: ${preview.meta.latestChapter}`
@@ -205,8 +218,8 @@ export default function CrawlerPanel() {
               </button>
             </div>
 
-            <div className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[160px_1fr]">
-              <label className="text-sm font-medium text-slate-600">
+            <div className="mt-4 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 sm:grid-cols-[160px_1fr]">
+              <label className="text-sm font-medium text-[var(--muted)]">
                 Chapter limit
               </label>
               <div className="flex flex-wrap items-center gap-2">
@@ -217,26 +230,26 @@ export default function CrawlerPanel() {
                   value={maxChapters}
                   onChange={(e) => setMaxChapters(Number(e.target.value))}
                 />
-                <span className="text-sm text-slate-500">
+                <span className="text-sm text-[var(--muted)]">
                   `0` means all chapters. Use a small number for quick tests.
                 </span>
               </div>
             </div>
 
-            <details className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
-              <summary className="cursor-pointer text-sm font-medium text-slate-700">
+            <details className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
+              <summary className="cursor-pointer text-sm font-medium text-[var(--app-fg)]">
                 Chapter list preview
               </summary>
               <div className="mt-3 max-h-56 overflow-auto">
                 {preview.chapters.slice(0, 80).map((ch, index) => (
                   <div
                     key={ch.url}
-                    className="flex gap-3 border-b border-slate-100 py-2 text-sm last:border-0"
+                    className="flex gap-3 border-b border-[var(--border)] py-2 text-sm last:border-0"
                   >
-                    <span className="w-10 shrink-0 text-slate-400">
+                    <span className="w-10 shrink-0 text-[var(--muted)]">
                       {index + 1}
                     </span>
-                    <span className="min-w-0 truncate text-slate-700">
+                    <span className="min-w-0 truncate text-[var(--app-fg)]">
                       {ch.title}
                     </span>
                   </div>
@@ -248,8 +261,8 @@ export default function CrawlerPanel() {
       )}
 
       {downloads.length > 0 && (
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="flex items-center justify-between gap-3 text-sm text-slate-600">
+        <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
+          <div className="flex items-center justify-between gap-3 text-sm text-[var(--muted)]">
             <span>
               {doneCount}/{downloads.length} saved · active {activeCount} · failed{' '}
               {failedCount}
@@ -258,9 +271,9 @@ export default function CrawlerPanel() {
               {showLog ? 'Hide log' : 'Show log'}
             </button>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/25">
             <div
-              className="h-full rounded-full bg-slate-950 transition-all duration-300"
+              className="h-full rounded-full bg-[var(--accent)] transition-all duration-300"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -270,12 +283,12 @@ export default function CrawlerPanel() {
               {latestDownloads.map((d) => (
                 <div
                   key={d.id}
-                  className="rounded-lg border border-slate-200 bg-white p-3"
+                  className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3"
                 >
-                  <div className="truncate text-sm font-medium text-slate-900">
+                  <div className="truncate text-sm font-medium text-[var(--app-fg)]">
                     {d.title || d.chapterId}
                   </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
+                  <div className="mt-1 flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
                     <span>{d.chapterId}</span>
                     <span
                       className={
@@ -300,6 +313,45 @@ export default function CrawlerPanel() {
           )}
         </div>
       )}
+      </section>
+
+      <aside className="surface-panel">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="panel-kicker">History</p>
+            <h2 className="panel-title">Crawled novels</h2>
+          </div>
+          <span className="text-sm text-[var(--muted)]">{history.length}</span>
+        </div>
+        <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
+          {history.length === 0 ? (
+            <div className="empty-state">No crawl history yet.</div>
+          ) : (
+            history.map((item) => (
+              <button
+                key={item.id}
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 text-left transition hover:border-[var(--accent)]"
+                onClick={() => {
+                  setUrl(item.url || '');
+                  setMessage('Loaded from history. Preview again to update metadata.');
+                }}
+              >
+                <div className="truncate text-sm font-semibold text-[var(--app-fg)]">
+                  {item.title || item.id}
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  {item.chapterCount || item.chapters?.length || 0} chapters
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  {item.lastCrawledAt
+                    ? new Date(item.lastCrawledAt).toLocaleString()
+                    : 'No timestamp'}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

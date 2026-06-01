@@ -9,6 +9,17 @@ function absolute(href: string, base: string) {
 }
 
 export const novelbinAdapter: SourceAdapter = {
+  id: 'novelbin',
+  label: 'NovelBin',
+  baseUrl: 'https://novelbin.me',
+  resolveCoverUrl(cover: string, meta: { sourceUrl?: string }) {
+    try {
+      if (cover.startsWith('//')) return `https:${cover}`;
+      return new URL(cover, meta.sourceUrl || this.baseUrl).href;
+    } catch (e) {
+      return undefined;
+    }
+  },
   match(url: string) {
     try {
       const host = new URL(url).hostname;
@@ -41,6 +52,9 @@ export const novelbinAdapter: SourceAdapter = {
       id: url,
       title,
       cover: cover ? absolute(cover, url) : undefined,
+      source: this.id,
+      sourceHost: new URL(url).hostname,
+      sourceUrl: url,
       author: author || undefined,
       summary: summary || undefined,
       url,

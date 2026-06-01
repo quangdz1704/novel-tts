@@ -23,8 +23,14 @@ export default function SettingsPanel() {
       <p className="panel-kicker">Preferences</p>
       <h2 className="panel-title">Settings</h2>
       <div className="mt-3">
-        <div className="flex items-center gap-3">
-          <label className="text-sm font-medium text-slate-600">Theme</label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm font-medium text-[var(--muted)]">App theme</label>
+          <button
+            className={theme === 'system' ? 'secondary-button' : 'ghost-button'}
+            onClick={() => setTheme('system')}
+          >
+            System
+          </button>
           <button
             className={theme === 'light' ? 'secondary-button' : 'ghost-button'}
             onClick={() => setTheme('light')}
@@ -39,7 +45,7 @@ export default function SettingsPanel() {
           </button>
         </div>
         <div className="mt-3">
-          <label className="block text-sm text-slate-600">
+          <label className="block text-sm text-[var(--muted)]">
             Reader font size: {fontSize}px
           </label>
           <input
@@ -51,7 +57,7 @@ export default function SettingsPanel() {
           />
         </div>
         <div className="mt-3 grid gap-3">
-          <label className="grid gap-1 text-sm text-slate-600">
+          <label className="grid gap-1 text-sm text-[var(--muted)]">
             Reader color
             <select
               className="field-input"
@@ -63,7 +69,7 @@ export default function SettingsPanel() {
               <option value="dark">Dark</option>
             </select>
           </label>
-          <label className="grid gap-1 text-sm text-slate-600">
+          <label className="grid gap-1 text-sm text-[var(--muted)]">
             Font family
             <select
               className="field-input"
@@ -74,7 +80,7 @@ export default function SettingsPanel() {
               <option value="sans">Sans</option>
             </select>
           </label>
-          <label className="grid gap-1 text-sm text-slate-600">
+          <label className="grid gap-1 text-sm text-[var(--muted)]">
             Line height: {lineHeight.toFixed(2)}
             <input
               type="range"

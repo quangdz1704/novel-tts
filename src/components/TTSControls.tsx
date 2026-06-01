@@ -58,7 +58,7 @@ export default function TTSControls() {
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <div className="mt-3 grid gap-3 text-sm text-slate-600">
+      <div className="mt-3 grid gap-3 text-sm text-[var(--muted)]">
         <label className="grid gap-1">
           Rate
           <input
@@ -107,10 +107,10 @@ export default function TTSControls() {
           Stop
         </button>
       </div>
-      <div className="mt-3 text-sm text-slate-500">
+      <div className="mt-3 text-sm text-[var(--muted)]">
         Speaking: {speaking ? 'Yes' : 'No'}
       </div>
-      <div className="mt-1 text-sm text-slate-500">
+      <div className="mt-1 text-sm text-[var(--muted)]">
         Progress:{' '}
         {progress
           ? `utterance ${progress.utteranceIndex} char ${progress.charIndex}`

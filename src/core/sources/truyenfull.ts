@@ -9,6 +9,17 @@ function absolute(href: string, base: string) {
 }
 
 export const truyenfullAdapter: SourceAdapter = {
+  id: 'truyenfull',
+  label: 'TruyenFull',
+  baseUrl: 'https://truyenfull.vision',
+  resolveCoverUrl(cover: string, meta: { sourceUrl?: string }) {
+    try {
+      if (cover.startsWith('//')) return `https:${cover}`;
+      return new URL(cover, meta.sourceUrl || this.baseUrl).href;
+    } catch (e) {
+      return undefined;
+    }
+  },
   match(url: string) {
     try {
       const host = new URL(url).hostname;
@@ -34,6 +45,9 @@ export const truyenfullAdapter: SourceAdapter = {
       id: url,
       title,
       cover: cover ? absolute(cover, url) : undefined,
+      source: this.id,
+      sourceHost: new URL(url).hostname,
+      sourceUrl: url,
       author: author || undefined,
       summary: summary || undefined,
       url,

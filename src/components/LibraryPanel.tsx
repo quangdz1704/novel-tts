@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { listChapters, listNovels } from '../core/storage/fsAdapter';
+import React, { useEffect, useMemo, useState } from "react";
+import { listChapters, listNovels } from "../core/storage/fsAdapter";
 import {
   listNovelsMetadata,
   listReadingProgress,
-} from '../core/storage/indexeddb';
-import NovelCard from './NovelCard';
-import { useReaderStore } from '../core/reader/readerStore';
+} from "../core/storage/indexeddb";
+import NovelCard from "./NovelCard";
+import { useReaderStore } from "../core/reader/readerStore";
+import BookCover from "./BookCover";
 
-type SortMode = 'recentRead' | 'recentCrawl' | 'title';
+type SortMode = "recentRead" | "recentCrawl" | "title";
 
 type LibraryItem = {
   id: string;
@@ -18,10 +19,10 @@ type LibraryItem = {
   progress?: any;
 };
 
-export default function LibraryPanel() {
+export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
   const [novels, setNovels] = useState<LibraryItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [sort, setSort] = useState<SortMode>('recentRead');
+  const [sort, setSort] = useState<SortMode>("recentRead");
   const [loading, setLoading] = useState(true);
   const openChapter = useReaderStore((s) => s.openChapter);
 
@@ -50,7 +51,7 @@ export default function LibraryPanel() {
             const storedChapters = await listChapters(id);
             const metaChapters = (metaById[id]?.chapters || []).map(
               (ch: any, index: number) => ({
-                id: `ch_${String(index + 1).padStart(4, '0')}`,
+                id: `ch_${String(index + 1).padStart(4, "0")}`,
                 title: ch.title,
                 url: ch.url,
               }),
@@ -65,7 +66,9 @@ export default function LibraryPanel() {
             return {
               id,
               firstChapter:
-                progressById[id]?.chapterId || chapters[0]?.id || storedChapters[0],
+                progressById[id]?.chapterId ||
+                chapters[0]?.id ||
+                storedChapters[0],
               chapterCount: chapters.length || storedChapters.length,
               chapters,
               meta: metaById[id] || { id },
@@ -77,7 +80,7 @@ export default function LibraryPanel() {
         setNovels(items);
         setSelectedId((current) => current || items[0]?.id);
       } catch (e) {
-        console.error('LibraryPanel load error', e);
+        console.error("LibraryPanel load error", e);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -89,10 +92,10 @@ export default function LibraryPanel() {
 
   const sorted = useMemo(() => {
     return [...novels].sort((a, b) => {
-      if (sort === 'title') {
+      if (sort === "title") {
         return (a.meta.title || a.id).localeCompare(b.meta.title || b.id);
       }
-      if (sort === 'recentCrawl') {
+      if (sort === "recentCrawl") {
         return (
           new Date(b.meta.lastCrawledAt || 0).getTime() -
           new Date(a.meta.lastCrawledAt || 0).getTime()
@@ -110,14 +113,21 @@ export default function LibraryPanel() {
   const open = (novelId: string, chapterId?: string) => {
     if (!chapterId) return;
     openChapter(novelId, chapterId);
+    onRead?.();
   };
 
   return (
-    <div className="surface-panel h-full">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="library-shell">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="panel-kicker">Bookshelf</p>
-          <h2 className="panel-title">Your library</h2>
+          <h2 className="text-3xl font-semibold tracking-tight text-[var(--app-fg)]">
+            Choose your next chapter
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+            Pick up from your latest chapter, inspect story details, or sort by
+            recent crawl updates.
+          </p>
         </div>
         <select
           className="field-input"
@@ -137,97 +147,101 @@ export default function LibraryPanel() {
           No books yet. Use Advanced mode, preview a URL, then confirm crawl.
         </div>
       ) : (
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-2">
-            {sorted.map((item) => (
-              <NovelCard
-                key={item.id}
-                novelId={item.id}
-                meta={item.meta}
-                chapterCount={item.chapterCount}
-                selected={item.id === selected?.id}
-                onSelect={() => setSelectedId(item.id)}
-                onOpen={() => open(item.id, item.firstChapter)}
-              />
-            ))}
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div>
+            <div className="books-grid">
+              {sorted.map((item) => (
+                <NovelCard
+                  key={item.id}
+                  novelId={item.id}
+                  meta={item.meta}
+                  chapterCount={item.chapterCount}
+                  selected={item.id === selected?.id}
+                  onSelect={() => setSelectedId(item.id)}
+                  onOpen={() => open(item.id, item.firstChapter)}
+                />
+              ))}
+            </div>
           </div>
 
           {selected && (
-            <aside className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex gap-3">
-                {selected.meta.cover ? (
-                  <img
-                    src={selected.meta.cover}
-                    alt=""
-                    className="h-28 w-20 rounded-lg object-cover"
+            <div className="">
+              <aside className="story-drawer sticky top-24">
+                <div className="flex gap-3">
+                  <BookCover
+                    title={selected.meta.title || selected.id}
+                    meta={selected.meta}
+                    className="h-32 w-24 shrink-0 rounded-xl object-cover shadow-lg shadow-black/20"
                   />
-                ) : (
-                  <div className="h-28 w-20 rounded-lg bg-slate-200" />
+                  <div className="min-w-0 flex-1">
+                    <h3 className="line-clamp-2 text-lg font-semibold text-[var(--app-fg)]">
+                      {selected.meta.title || selected.id}
+                    </h3>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      {selected.meta.author || "Unknown author"}
+                    </p>
+                    <p className="mt-2 text-xs text-[var(--muted)]">
+                      {selected.meta.status || "Unknown status"} ·{" "}
+                      {selected.chapterCount} chapters
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    className="primary-button"
+                    onClick={() => open(selected.id, selected.firstChapter)}
+                  >
+                    {selected.meta.lastReadChapterId ? "Continue" : "Start"}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled
+                    title="Coming soon"
+                  >
+                    Update
+                  </button>
+                </div>
+
+                {selected.meta.lastReadChapterTitle && (
+                  <div className="mt-3 rounded-xl bg-[var(--panel-elevated)] p-3 text-sm text-[var(--muted)]">
+                    Last read: {selected.meta.lastReadChapterTitle}
+                  </div>
                 )}
-                <div className="min-w-0 flex-1">
-                  <h3 className="line-clamp-2 font-semibold text-slate-950">
-                    {selected.meta.title || selected.id}
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {selected.meta.author || 'Unknown author'}
+
+                <details className="mt-3 rounded-xl bg-[var(--panel-elevated)] p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-[var(--app-fg)]">
+                    Story info
+                  </summary>
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    {selected.meta.summary || "No summary available."}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {selected.meta.status || 'Unknown status'} ·{' '}
-                    {selected.chapterCount} chapters
-                  </p>
+                </details>
+
+                <div className="mt-3">
+                  <div className="section-label">Chapters</div>
+                  <div className="mt-2 max-h-[212px] overflow-auto rounded-xl bg-[var(--panel-elevated)]">
+                    {selected.chapters.map((chapter, index) => (
+                      <button
+                        key={chapter.id}
+                        className="flex w-full items-center gap-3 border-b border-[var(--border)] px-3 py-2.5 text-left text-sm last:border-0 hover:bg-white/5"
+                        onClick={() => open(selected.id, chapter.id)}
+                      >
+                        <span className="w-9 shrink-0 text-xs text-[var(--muted)]">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[var(--app-fg)]">
+                          {chapter.title}
+                        </span>
+                        {selected.meta.lastReadChapterId === chapter.id && (
+                          <span className="badge badge-good">last</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <button
-                  className="primary-button"
-                  onClick={() => open(selected.id, selected.firstChapter)}
-                >
-                  {selected.meta.lastReadChapterId ? 'Continue' : 'Start'}
-                </button>
-                <button className="secondary-button" disabled>
-                  Update
-                </button>
-              </div>
-
-              {selected.meta.lastReadChapterTitle && (
-                <div className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-600">
-                  Last read: {selected.meta.lastReadChapterTitle}
-                </div>
-              )}
-
-              <details className="mt-3 rounded-lg bg-white p-3">
-                <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                  Story info
-                </summary>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {selected.meta.summary || 'No summary available.'}
-                </p>
-              </details>
-
-              <div className="mt-3">
-                <div className="section-label">Chapters</div>
-                <div className="mt-2 max-h-80 overflow-auto rounded-lg bg-white">
-                  {selected.chapters.map((chapter, index) => (
-                    <button
-                      key={chapter.id}
-                      className="flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-slate-50"
-                      onClick={() => open(selected.id, chapter.id)}
-                    >
-                      <span className="w-9 shrink-0 text-xs text-slate-400">
-                        {index + 1}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-slate-700">
-                        {chapter.title}
-                      </span>
-                      {selected.meta.lastReadChapterId === chapter.id && (
-                        <span className="badge badge-good">last</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </aside>
+              </aside>
+            </div>
           )}
         </div>
       )}

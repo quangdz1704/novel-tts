@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type AppMode = 'reader' | 'advanced';
+export type AppMode = 'library' | 'reading' | 'admin';
 
 export default function Header({
   mode,
@@ -10,28 +10,34 @@ export default function Header({
   onModeChange: (mode: AppMode) => void;
 }) {
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-slate-100/90 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--app-bg-soft)]/90 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between lg:px-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-950">
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--app-fg)]">
             Novel TTS
           </h1>
-          <p className="text-sm text-slate-500">
-            Local-first reader, crawler and TTS
+          <p className="text-sm text-[var(--muted)]">
+            Library, immersive reading, crawler admin
           </p>
         </div>
         <nav className="segmented-control" aria-label="App mode">
           <button
-            className={mode === 'reader' ? 'active' : ''}
-            onClick={() => onModeChange('reader')}
+            className={mode === 'library' ? 'active' : ''}
+            onClick={() => onModeChange('library')}
           >
-            Reader
+            Library
           </button>
           <button
-            className={mode === 'advanced' ? 'active' : ''}
-            onClick={() => onModeChange('advanced')}
+            className={mode === 'reading' ? 'active' : ''}
+            onClick={() => onModeChange('reading')}
           >
-            Advanced
+            Reading
+          </button>
+          <button
+            className={mode === 'admin' ? 'active' : ''}
+            onClick={() => onModeChange('admin')}
+          >
+            Admin
           </button>
         </nav>
       </div>

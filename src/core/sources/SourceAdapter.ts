@@ -1,10 +1,17 @@
 export interface SourceAdapter {
+  id: string;
+  label: string;
+  baseUrl?: string;
   match(url: string): boolean;
+  resolveCoverUrl?: (cover: string, meta: { sourceUrl?: string }) => string | undefined;
 
   getNovel(url: string): Promise<{
     id: string;
     title: string;
     cover?: string;
+    source?: string;
+    sourceHost?: string;
+    sourceUrl?: string;
     author?: string;
     summary?: string;
     status?: string;

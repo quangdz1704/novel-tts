@@ -30,7 +30,7 @@ export default function GlossaryPanel() {
           Apply Glossary
         </button>
       </div>
-      <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+      <div className="mt-3 rounded-xl bg-[var(--panel-elevated)] p-3 text-sm text-[var(--muted)]">
         {output || 'Glossary output will appear here.'}
       </div>
     </div>

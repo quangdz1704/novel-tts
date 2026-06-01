@@ -8,31 +8,55 @@ import LibraryPanel from '../components/LibraryPanel';
 import SettingsPanel from '../components/SettingsPanel';
 
 export default function Home() {
-  const [mode, setMode] = React.useState<'reader' | 'advanced'>('reader');
+  const [mode, setMode] = React.useState<'library' | 'reading' | 'admin'>(
+    'library',
+  );
+  const [adminTab, setAdminTab] = React.useState<'crawl' | 'tools'>('crawl');
 
   return (
     <div>
       <Header mode={mode} onModeChange={setMode} />
-      <main className="mx-auto max-w-7xl px-4 py-4 lg:px-6">
-        {mode === 'reader' ? (
-          <section className="grid min-h-[calc(100vh-112px)] gap-4 lg:grid-cols-[360px_1fr]">
-            <aside className="order-2 lg:order-1">
-              <LibraryPanel />
-            </aside>
-            <section className="order-1 min-w-0 lg:order-2">
-              <ReaderPanel />
-            </section>
-          </section>
-        ) : (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
-            <section>
+      <main className="mx-auto max-w-7xl px-4 py-5 lg:px-6">
+        {mode === 'library' && (
+          <LibraryPanel onRead={() => setMode('reading')} />
+        )}
+
+        {mode === 'reading' && (
+          <ReaderPanel onBackToLibrary={() => setMode('library')} />
+        )}
+
+        {mode === 'admin' && (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 shadow-xl shadow-black/10 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="panel-kicker">Admin workspace</p>
+                <h2 className="panel-title">Crawler and tools</h2>
+              </div>
+              <div className="segmented-control w-full sm:w-auto">
+                <button
+                  className={adminTab === 'crawl' ? 'active' : ''}
+                  onClick={() => setAdminTab('crawl')}
+                >
+                  Crawl
+                </button>
+                <button
+                  className={adminTab === 'tools' ? 'active' : ''}
+                  onClick={() => setAdminTab('tools')}
+                >
+                  Tools
+                </button>
+              </div>
+            </div>
+
+            {adminTab === 'crawl' ? (
               <CrawlerPanel />
-            </section>
-            <aside className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-              <SettingsPanel />
-              <TTSControls />
-              <GlossaryPanel />
-            </aside>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-3">
+                <SettingsPanel />
+                <TTSControls />
+                <GlossaryPanel />
+              </div>
+            )}
           </div>
         )}
       </main>

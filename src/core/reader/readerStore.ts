@@ -1,11 +1,11 @@
-import { create } from 'zustand';
-import { getLibraryPath, readJsonFile } from '../storage/fsAdapter';
+import { create } from "zustand";
+import { getLibraryPath, readJsonFile } from "../storage/fsAdapter";
 import {
   saveReadingProgress,
   getReadingProgress,
   getNovelMetadata,
   saveNovelMetadata,
-} from '../storage/indexeddb';
+} from "../storage/indexeddb";
 
 type ReaderState = {
   novelId?: string;
@@ -20,6 +20,8 @@ type ReaderState = {
 };
 
 export const useReaderStore = create<ReaderState>((set, get) => ({
+  chapterTitle: undefined,
+  novelTitle: undefined,
   novelId: undefined,
   chapterId: undefined,
   content: undefined,
@@ -49,7 +51,7 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
         return true;
       }
     } catch (e) {
-      console.error('loadChapter error', e);
+      console.error("loadChapter error", e);
     }
     return false;
   },
@@ -67,7 +69,7 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
         position: pos,
       });
     } catch (e) {
-      console.error('saveProgress failed', e);
+      console.error("saveProgress failed", e);
     }
   },
   async restoreProgress(novelId: string) {

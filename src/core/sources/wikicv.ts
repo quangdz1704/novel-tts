@@ -48,6 +48,27 @@ function nextChapterUrl(doc: Document, baseUrl: string) {
 }
 
 export const wikicvAdapter: SourceAdapter = {
+  id: 'wikicv',
+  label: 'WikiCV',
+  baseUrl: BASE_URL,
+  resolveCoverUrl(cover: string, meta: { sourceUrl?: string }) {
+    try {
+      if (cover.startsWith('http://') || cover.startsWith('https://')) {
+        const parsed = new URL(cover);
+        if (
+          parsed.pathname.startsWith('/photo/') &&
+          ['localhost', '127.0.0.1'].includes(parsed.hostname)
+        ) {
+          return new URL(parsed.pathname + parsed.search, BASE_URL).href;
+        }
+        return cover;
+      }
+      if (cover.startsWith('//')) return `https:${cover}`;
+      return new URL(cover, meta.sourceUrl || BASE_URL).href;
+    } catch (e) {
+      return undefined;
+    }
+  },
   match(url: string) {
     try {
       return new URL(url).hostname.includes('wikicv.net');
@@ -67,7 +88,9 @@ export const wikicvAdapter: SourceAdapter = {
       info?.querySelector('h2')?.textContent?.trim() ||
       doc.querySelector('title')?.textContent?.trim() ||
       '';
-    const cover = doc.querySelector<HTMLImageElement>('.book-info img')?.src;
+    const cover = doc
+      .querySelector<HTMLImageElement>('.book-info img')
+      ?.getAttribute('src');
     const latest = uniqueChapterLinks(doc, url).find((ch) =>
       /chuong-\d+/i.test(ch.url),
     );
@@ -76,6 +99,9 @@ export const wikicvAdapter: SourceAdapter = {
       id: url,
       title,
       cover: cover ? absolute(cover, url) : undefined,
+      source: this.id,
+      sourceHost: new URL(url).hostname,
+      sourceUrl: url,
       author: getInfoLine(infoText, 'Tác giả'),
       summary:
         doc.querySelector('.book-desc, .desc, #bookDescription')

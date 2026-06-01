@@ -1,4 +1,5 @@
 import React from 'react';
+import BookCover from './BookCover';
 
 export default function NovelCard({
   novelId,
@@ -17,30 +18,24 @@ export default function NovelCard({
 }) {
   return (
     <div
-      className={`flex h-full cursor-pointer flex-col overflow-hidden rounded-xl border bg-white transition hover:border-slate-300 hover:shadow-sm ${
-        selected ? 'border-slate-950 ring-2 ring-slate-200' : 'border-slate-200'
+      className={`book-card ${
+        selected ? 'border-[var(--accent)] ring-2 ring-[var(--accent-soft)]' : ''
       }`}
       onClick={onSelect}
     >
-      {meta?.cover ? (
-        <img
-          src={meta.cover}
-          alt=""
-          className="aspect-[3/4] w-full object-cover"
-        />
-      ) : (
-        <div className="flex aspect-[3/4] w-full items-center justify-center bg-slate-100 text-4xl font-semibold text-slate-400">
-          {(meta?.title || novelId).slice(0, 1).toUpperCase()}
-        </div>
-      )}
+      <BookCover
+        title={meta?.title || novelId}
+        meta={meta}
+        className="book-card-cover"
+      />
       <div className="min-w-0 flex-1 p-3">
-        <div className="line-clamp-2 min-h-10 font-semibold leading-5 text-slate-950">
+        <div className="line-clamp-2 min-h-10 font-semibold leading-5 text-[var(--app-fg)]">
           {meta?.title || novelId}
         </div>
-        <div className="truncate text-sm text-slate-500">
+        <div className="truncate text-sm text-[var(--muted)]">
           {meta?.author || 'unknown author'}
         </div>
-        <div className="mt-1 text-xs text-slate-400">
+        <div className="mt-1 text-xs text-[var(--muted)]">
           {chapterCount} saved chapters
         </div>
         <div className="mt-3 flex gap-2">
