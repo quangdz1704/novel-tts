@@ -41,7 +41,7 @@ export class CrawlerQueue extends EventEmitter {
       this.handle(job).finally(() => {
         this.running--;
         this.emit('done', job);
-        setImmediate(() => this.next());
+        setTimeout(() => this.next(), 0);
       });
     }
   }

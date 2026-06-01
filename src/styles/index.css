@@ -8,8 +8,142 @@ body,
   height: 100%;
 }
 
-/* basic glassmorphism background utility */
-.glass-card {
-  background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(6px);
+body {
+  margin: 0;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@layer components {
+  .surface-panel {
+    @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+  }
+
+  .panel-kicker {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-400;
+  }
+
+  .panel-title {
+    @apply text-lg font-semibold text-slate-950;
+  }
+
+  .section-label {
+    @apply text-sm font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .field-input {
+    @apply rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100;
+  }
+
+  .primary-button {
+    @apply rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:hover:bg-slate-950;
+  }
+
+  .secondary-button {
+    @apply rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-50;
+  }
+
+  .ghost-button {
+    @apply rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900;
+  }
+
+  .status-note {
+    @apply rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800;
+  }
+
+  .empty-state {
+    @apply rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500;
+  }
+
+  .segmented-control {
+    @apply grid grid-cols-2 rounded-lg border border-slate-200 bg-white p-1 shadow-sm;
+  }
+
+  .segmented-control button {
+    @apply rounded-md px-4 py-2 text-sm font-medium text-slate-500 transition hover:text-slate-900;
+  }
+
+  .segmented-control button.active {
+    @apply bg-slate-950 text-white shadow-sm hover:text-white;
+  }
+
+  .reader-panel {
+    @apply flex h-[calc(100vh-112px)] min-h-[560px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .reader-content {
+    @apply min-h-0 flex-1 overflow-auto px-5 py-6 text-slate-800 sm:px-8 lg:px-12;
+  }
+
+  .reader-theme-paper {
+    background: #fbf6e8;
+    color: #2f2a22;
+  }
+
+  .reader-theme-light {
+    background: #ffffff;
+    color: #1e293b;
+  }
+
+  .reader-theme-dark {
+    background: #111827;
+    color: #d1d5db;
+  }
+
+  .reader-theme-dark h1,
+  .reader-theme-dark h2,
+  .reader-theme-dark h3 {
+    color: #f8fafc;
+  }
+
+  .reader-content h1,
+  .reader-content h2,
+  .reader-content h3 {
+    @apply mb-4 mt-6 font-semibold text-slate-950;
+  }
+
+  .reader-content p {
+    @apply mb-4;
+  }
+
+  .reader-empty {
+    @apply flex h-full flex-col items-center justify-center text-center;
+  }
+
+  .badge {
+    @apply rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+
+  .badge-good {
+    @apply bg-emerald-50 text-emerald-700;
+  }
+
+  .badge-warn {
+    @apply bg-amber-50 text-amber-700;
+  }
+
+  .badge-bad {
+    @apply bg-red-50 text-red-700;
+  }
+}
+
+@media (max-width: 1023px) {
+  .reader-panel {
+    min-height: 620px;
+    height: calc(100vh - 144px);
+  }
 }

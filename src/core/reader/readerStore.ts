@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { getLibraryPath, readJsonFile } from '../storage/fsAdapter';
-import { saveReadingProgress, getReadingProgress } from '../storage/indexeddb';
+import {
+  saveReadingProgress,
+  getReadingProgress,
+  getNovelMetadata,
+  saveNovelMetadata,
+} from '../storage/indexeddb';
 
 type ReaderState = {
   novelId?: string;
@@ -32,6 +37,15 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
       const data: any = await readJsonFile(path);
       if (data && data.content) {
         set({ content: data.content });
+        try {
+          const meta: any = await getNovelMetadata(novelId);
+          await saveNovelMetadata(novelId, {
+            ...(meta || { id: novelId }),
+            lastReadAt: new Date().toISOString(),
+            lastReadChapterId: chapterId,
+            lastReadChapterTitle: data.title,
+          });
+        } catch (e) {}
         return true;
       }
     } catch (e) {
@@ -47,7 +61,11 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
     const { novelId } = get();
     if (!novelId) return;
     try {
-      await saveReadingProgress(novelId, { position: pos });
+      await saveReadingProgress(novelId, {
+        chapterId: get().chapterId,
+        updatedAt: new Date().toISOString(),
+        position: pos,
+      });
     } catch (e) {
       console.error('saveProgress failed', e);
     }

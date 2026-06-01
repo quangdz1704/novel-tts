@@ -72,3 +72,14 @@ export async function getReadingProgress(novelId: string) {
     req.onerror = () => reject(req.error);
   });
 }
+
+export async function listReadingProgress() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PROGRESS_STORE, 'readonly');
+    const store = tx.objectStore(PROGRESS_STORE);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}

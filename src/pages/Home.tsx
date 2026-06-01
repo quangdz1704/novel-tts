@@ -8,23 +8,33 @@ import LibraryPanel from '../components/LibraryPanel';
 import SettingsPanel from '../components/SettingsPanel';
 
 export default function Home() {
+  const [mode, setMode] = React.useState<'reader' | 'advanced'>('reader');
+
   return (
-    <div className="container mx-auto p-6">
-      <Header />
-      <main className="mt-6">
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-6 rounded-2xl bg-white/5 shadow-lg">
-            Welcome to Novel TTS — scaffolded.
+    <div>
+      <Header mode={mode} onModeChange={setMode} />
+      <main className="mx-auto max-w-7xl px-4 py-4 lg:px-6">
+        {mode === 'reader' ? (
+          <section className="grid min-h-[calc(100vh-112px)] gap-4 lg:grid-cols-[360px_1fr]">
+            <aside className="order-2 lg:order-1">
+              <LibraryPanel />
+            </aside>
+            <section className="order-1 min-w-0 lg:order-2">
+              <ReaderPanel />
+            </section>
+          </section>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
+            <section>
+              <CrawlerPanel />
+            </section>
+            <aside className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+              <SettingsPanel />
+              <TTSControls />
+              <GlossaryPanel />
+            </aside>
           </div>
-          <div className="col-span-1 md:col-span-2 space-y-4">
-            <CrawlerPanel />
-            <GlossaryPanel />
-            <TTSControls />
-            <ReaderPanel />
-            <LibraryPanel />
-            <SettingsPanel />
-          </div>
-        </section>
+        )}
       </main>
     </div>
   );

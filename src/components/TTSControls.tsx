@@ -50,15 +50,16 @@ export default function TTSControls() {
   };
 
   return (
-    <div className="p-4 glass-card rounded-2xl shadow">
-      <h2 className="text-lg font-semibold">TTS Controls</h2>
+    <div className="surface-panel">
+      <p className="panel-kicker">Voice</p>
+      <h2 className="panel-title">TTS controls</h2>
       <textarea
-        className="w-full h-28 p-2 mt-2 bg-white/5"
+        className="field-input mt-3 h-28 w-full resize-none"
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <div className="flex gap-2 mt-2">
-        <label className="flex items-center gap-2">
+      <div className="mt-3 grid gap-3 text-sm text-slate-600">
+        <label className="grid gap-1">
           Rate
           <input
             type="range"
@@ -69,7 +70,7 @@ export default function TTSControls() {
             onChange={(e) => setRate(Number(e.target.value))}
           />
         </label>
-        <label className="flex items-center gap-2">
+        <label className="grid gap-1">
           Pitch
           <input
             type="range"
@@ -80,7 +81,7 @@ export default function TTSControls() {
             onChange={(e) => setPitch(Number(e.target.value))}
           />
         </label>
-        <label className="flex items-center gap-2">
+        <label className="grid gap-1">
           Volume
           <input
             type="range"
@@ -92,30 +93,24 @@ export default function TTSControls() {
           />
         </label>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button className="px-3 py-2 rounded bg-green-600" onClick={handlePlay}>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button className="primary-button" onClick={handlePlay}>
           Play
         </button>
-        <button
-          className="px-3 py-2 rounded bg-yellow-600"
-          onClick={handlePause}
-        >
+        <button className="secondary-button" onClick={handlePause}>
           Pause
         </button>
-        <button
-          className="px-3 py-2 rounded bg-blue-600"
-          onClick={handleResume}
-        >
+        <button className="secondary-button" onClick={handleResume}>
           Resume
         </button>
-        <button className="px-3 py-2 rounded bg-red-600" onClick={handleStop}>
+        <button className="ghost-button" onClick={handleStop}>
           Stop
         </button>
       </div>
-      <div className="mt-2 text-sm text-gray-300">
+      <div className="mt-3 text-sm text-slate-500">
         Speaking: {speaking ? 'Yes' : 'No'}
       </div>
-      <div className="mt-1 text-sm text-gray-300">
+      <div className="mt-1 text-sm text-slate-500">
         Progress:{' '}
         {progress
           ? `utterance ${progress.utteranceIndex} char ${progress.charIndex}`

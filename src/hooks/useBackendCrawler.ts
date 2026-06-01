@@ -4,6 +4,9 @@ type EventCallback = (payload: any) => void;
 
 export function useBackendCrawler() {
   const listenerRef = useRef<any>(null);
+  const isAvailable =
+    typeof window !== 'undefined' &&
+    Boolean((window as any).__TAURI__ || (window as any).__TAURI_IPC__);
 
   useEffect(() => {
     return () => {
@@ -54,5 +57,5 @@ export function useBackendCrawler() {
     }
   }
 
-  return { start, stop };
+  return { isAvailable, start, stop };
 }

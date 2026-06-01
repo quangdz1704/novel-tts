@@ -2,6 +2,8 @@
 
 Local-first desktop/web scaffold for reading web novels, downloading chapters, saving a local library, and playing text through browser TTS. The app is built with Vite, React, TypeScript, Tailwind, Zustand, and a minimal Tauri shell.
 
+See [docs/development.md](docs/development.md) for local development, Tauri notes, test flow, storage, and source adapter extension.
+
 ## Business Scope
 
 Novel TTS targets a personal novel reader workflow:
@@ -18,20 +20,20 @@ Novel TTS targets a personal novel reader workflow:
 Implemented:
 
 - React UI panels for crawler, glossary, TTS, reader, library, and settings.
-- Source adapter interface with initial `novelbin` and `truyenfull` adapters.
+- Reader-first layout with `Reader` and `Advanced` modes, responsive down to mobile width.
+- Source adapter interface with initial `wikicv`, `novelbin`, and `truyenfull` adapters.
 - Frontend crawler queue and download queue.
 - Tauri command bridge that can spawn the Node Playwright crawler and stream `crawler-event` updates.
 - Local storage split between Tauri filesystem JSON files and IndexedDB metadata/progress.
 - Browser Web Speech API TTS controls.
+- Basic readable-content extraction and HTML sanitization before reader render.
 - Translator provider abstractions for OpenAI, Gemini, Ollama, and DeepSeek-style providers.
 - Basic glossary manager and seed glossary JSON files.
 - Minimal Vitest coverage for reader store shape.
 
 Still scaffold-level:
 
-- The main screen is a developer demo dashboard, not yet a polished reader product.
 - Crawling selectors are basic and may fail when websites change markup or block CORS/automation.
-- Chapter download currently saves raw fetched HTML in the frontend path.
 - Translation providers are not wired into the UI flow.
 - Settings currently persist values but are not fully applied across the reader UI.
 - Test coverage is very thin.
@@ -115,7 +117,7 @@ The app stores library content under the Tauri app directory when running in Tau
   chapters/<chapterId>.json
 ```
 
-In browser-only mode, the filesystem adapter falls back to a relative `library` path, but Tauri filesystem APIs are still required for real file writes. Novel metadata and reader progress are stored in IndexedDB.
+In browser-only mode, the filesystem adapter uses a localStorage fallback for development. Novel metadata and reader progress are stored in IndexedDB.
 
 ## Architecture
 
@@ -135,16 +137,14 @@ In browser-only mode, the filesystem adapter falls back to a relative `library` 
 High priority:
 
 - Add real end-to-end crawler tests with fixture HTML for each source adapter.
-- Normalize downloaded chapters to safe reader content instead of storing raw full-page HTML.
-- Replace `dangerouslySetInnerHTML` with sanitized content rendering.
-- Make reader open real chapter IDs from library metadata instead of defaulting to chapter `1`.
+- Strengthen readable-content extraction per source and add fixture coverage.
+- Move sanitization to a dedicated audited dependency before broader source support.
 - Wire settings into reader typography/theme consistently.
 - Add UI states for crawler errors, empty adapter matches, unsupported sites, and failed filesystem writes.
 
 Medium priority:
 
 - Add `lint` and stronger test scripts to CI.
-- Avoid global `process`/`EventEmitter` browser polyfills in `index.html`; isolate any Node-only dependencies from the browser bundle.
 - Persist crawler/download queue state so interrupted downloads can resume.
 - Add cancellation for active download jobs, not only queued crawler jobs.
 - Improve backend process cleanup after normal crawler exit.
@@ -169,4 +169,4 @@ npm run crawl:demo
 
 All commands pass when Playwright Chromium is allowed to launch. In a restricted sandbox on macOS, `npm run crawl:demo` can fail with a Chromium Mach port permission error; rerun it in a normal terminal.
 
-`npm run build` still emits Vite warnings about browser externalization of `process` and `events` from the current `index.html` polyfill script, plus a Tauri dynamic import chunking warning.
+More detailed development instructions are in [docs/development.md](docs/development.md).

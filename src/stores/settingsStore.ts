@@ -3,8 +3,14 @@ import { create } from 'zustand';
 type SettingsState = {
   theme: 'light' | 'dark';
   fontSize: number;
+  readerTheme: 'paper' | 'light' | 'dark';
+  lineHeight: number;
+  fontFamily: 'sans' | 'serif';
   setTheme: (t: 'light' | 'dark') => void;
   setFontSize: (n: number) => void;
+  setReaderTheme: (t: 'paper' | 'light' | 'dark') => void;
+  setLineHeight: (n: number) => void;
+  setFontFamily: (f: 'sans' | 'serif') => void;
   load: () => void;
 };
 
@@ -13,12 +19,15 @@ const KEY = 'novel_tts_settings';
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: 'light',
   fontSize: 16,
+  readerTheme: 'paper',
+  lineHeight: 1.85,
+  fontFamily: 'serif',
   setTheme: (t) => {
     set({ theme: t });
     try {
       localStorage.setItem(
         KEY,
-        JSON.stringify({ theme: t, fontSize: get().fontSize }),
+        JSON.stringify({ ...get(), theme: t }),
       );
     } catch (e) {}
     try {
@@ -35,13 +44,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       localStorage.setItem(
         KEY,
-        JSON.stringify({ theme: get().theme, fontSize: n }),
+        JSON.stringify({ ...get(), fontSize: n }),
       );
     } catch (e) {}
     try {
       const root =
         typeof document !== 'undefined' ? document.documentElement : null;
       if (root) root.style.setProperty('--reader-font-size', n + 'px');
+    } catch (e) {}
+  },
+  setReaderTheme: (t) => {
+    set({ readerTheme: t });
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ ...get(), readerTheme: t }));
+    } catch (e) {}
+  },
+  setLineHeight: (n) => {
+    set({ lineHeight: n });
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ ...get(), lineHeight: n }));
+    } catch (e) {}
+  },
+  setFontFamily: (f) => {
+    set({ fontFamily: f });
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ ...get(), fontFamily: f }));
     } catch (e) {}
   },
   load: () => {
@@ -51,6 +78,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         const obj = JSON.parse(raw);
         if (obj.theme) get().setTheme(obj.theme);
         if (obj.fontSize) get().setFontSize(obj.fontSize);
+        if (obj.readerTheme) get().setReaderTheme(obj.readerTheme);
+        if (obj.lineHeight) get().setLineHeight(obj.lineHeight);
+        if (obj.fontFamily) get().setFontFamily(obj.fontFamily);
       }
     } catch (e) {}
   },

@@ -1,30 +1,85 @@
-import React, { useEffect, useState } from 'react';
-import { listNovels } from '../core/storage/fsAdapter';
-import { listNovelsMetadata } from '../core/storage/indexeddb';
+import React, { useEffect, useMemo, useState } from 'react';
+import { listChapters, listNovels } from '../core/storage/fsAdapter';
+import {
+  listNovelsMetadata,
+  listReadingProgress,
+} from '../core/storage/indexeddb';
 import NovelCard from './NovelCard';
-import VirtualList from './VirtualList';
 import { useReaderStore } from '../core/reader/readerStore';
 
+type SortMode = 'recentRead' | 'recentCrawl' | 'title';
+
+type LibraryItem = {
+  id: string;
+  firstChapter?: string;
+  chapterCount: number;
+  chapters: Array<{ id: string; title: string; url?: string }>;
+  meta: any;
+  progress?: any;
+};
+
 export default function LibraryPanel() {
-  const [novels, setNovels] = useState<string[]>([]);
-  const [meta, setMeta] = useState<Record<string, any>>({});
+  const [novels, setNovels] = useState<LibraryItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [sort, setSort] = useState<SortMode>('recentRead');
+  const [loading, setLoading] = useState(true);
   const openChapter = useReaderStore((s) => s.openChapter);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const files = await listNovels();
+        const [files, dbMeta, progressRows] = await Promise.all([
+          listNovels(),
+          listNovelsMetadata(),
+          listReadingProgress(),
+        ]);
         if (!mounted) return;
-        setNovels(files.filter((name): name is string => Boolean(name)));
-        const metas: any = {};
-        try {
-          const dbMeta: any = await listNovelsMetadata();
-          (dbMeta || []).forEach((m: any) => (metas[m.id] = m));
-        } catch (e) {}
-        if (mounted) setMeta(metas);
+        const metaById: Record<string, any> = {};
+        ((dbMeta as any[]) || []).forEach((m) => (metaById[m.id] = m));
+        const progressById: Record<string, any> = {};
+        ((progressRows as any[]) || []).forEach((p) => {
+          progressById[p.novelId] = p;
+        });
+
+        const ids = files.filter((name: string | undefined): name is string =>
+          Boolean(name),
+        );
+        const items = await Promise.all(
+          ids.map(async (id: string) => {
+            const storedChapters = await listChapters(id);
+            const metaChapters = (metaById[id]?.chapters || []).map(
+              (ch: any, index: number) => ({
+                id: `ch_${String(index + 1).padStart(4, '0')}`,
+                title: ch.title,
+                url: ch.url,
+              }),
+            );
+            const chapters =
+              metaChapters.length > 0
+                ? metaChapters
+                : storedChapters.map((chapterId: string) => ({
+                    id: chapterId,
+                    title: chapterId,
+                  }));
+            return {
+              id,
+              firstChapter:
+                progressById[id]?.chapterId || chapters[0]?.id || storedChapters[0],
+              chapterCount: chapters.length || storedChapters.length,
+              chapters,
+              meta: metaById[id] || { id },
+              progress: progressById[id],
+            };
+          }),
+        );
+        if (!mounted) return;
+        setNovels(items);
+        setSelectedId((current) => current || items[0]?.id);
       } catch (e) {
         console.error('LibraryPanel load error', e);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -32,28 +87,150 @@ export default function LibraryPanel() {
     };
   }, []);
 
+  const sorted = useMemo(() => {
+    return [...novels].sort((a, b) => {
+      if (sort === 'title') {
+        return (a.meta.title || a.id).localeCompare(b.meta.title || b.id);
+      }
+      if (sort === 'recentCrawl') {
+        return (
+          new Date(b.meta.lastCrawledAt || 0).getTime() -
+          new Date(a.meta.lastCrawledAt || 0).getTime()
+        );
+      }
+      return (
+        new Date(b.meta.lastReadAt || b.progress?.updatedAt || 0).getTime() -
+        new Date(a.meta.lastReadAt || a.progress?.updatedAt || 0).getTime()
+      );
+    });
+  }, [novels, sort]);
+
+  const selected = sorted.find((item) => item.id === selectedId) || sorted[0];
+
+  const open = (novelId: string, chapterId?: string) => {
+    if (!chapterId) return;
+    openChapter(novelId, chapterId);
+  };
+
   return (
-    <div className="p-4 glass-card rounded-2xl shadow">
-      <h2 className="text-lg font-semibold">Library</h2>
-      <div className="mt-3">
-        {novels.length === 0 ? (
-          <div className="text-gray-400">No novels found in library.</div>
-        ) : (
-          <VirtualList
-            items={novels}
-            itemHeight={96}
-            height={360}
-            renderItem={(nid) => (
-              <NovelCard
-                key={nid}
-                novelId={nid}
-                meta={meta[nid]}
-                onOpen={() => openChapter(nid, '1')}
-              />
-            )}
-          />
-        )}
+    <div className="surface-panel h-full">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="panel-kicker">Bookshelf</p>
+          <h2 className="panel-title">Your library</h2>
+        </div>
+        <select
+          className="field-input"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortMode)}
+        >
+          <option value="recentRead">Recent read</option>
+          <option value="recentCrawl">Recent update</option>
+          <option value="title">Title</option>
+        </select>
       </div>
+
+      {loading ? (
+        <div className="mt-3 empty-state">Loading library...</div>
+      ) : sorted.length === 0 ? (
+        <div className="mt-3 empty-state">
+          No books yet. Use Advanced mode, preview a URL, then confirm crawl.
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-2">
+            {sorted.map((item) => (
+              <NovelCard
+                key={item.id}
+                novelId={item.id}
+                meta={item.meta}
+                chapterCount={item.chapterCount}
+                selected={item.id === selected?.id}
+                onSelect={() => setSelectedId(item.id)}
+                onOpen={() => open(item.id, item.firstChapter)}
+              />
+            ))}
+          </div>
+
+          {selected && (
+            <aside className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex gap-3">
+                {selected.meta.cover ? (
+                  <img
+                    src={selected.meta.cover}
+                    alt=""
+                    className="h-28 w-20 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="h-28 w-20 rounded-lg bg-slate-200" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <h3 className="line-clamp-2 font-semibold text-slate-950">
+                    {selected.meta.title || selected.id}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {selected.meta.author || 'Unknown author'}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {selected.meta.status || 'Unknown status'} ·{' '}
+                    {selected.chapterCount} chapters
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  className="primary-button"
+                  onClick={() => open(selected.id, selected.firstChapter)}
+                >
+                  {selected.meta.lastReadChapterId ? 'Continue' : 'Start'}
+                </button>
+                <button className="secondary-button" disabled>
+                  Update
+                </button>
+              </div>
+
+              {selected.meta.lastReadChapterTitle && (
+                <div className="mt-3 rounded-lg bg-white p-3 text-sm text-slate-600">
+                  Last read: {selected.meta.lastReadChapterTitle}
+                </div>
+              )}
+
+              <details className="mt-3 rounded-lg bg-white p-3">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Story info
+                </summary>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {selected.meta.summary || 'No summary available.'}
+                </p>
+              </details>
+
+              <div className="mt-3">
+                <div className="section-label">Chapters</div>
+                <div className="mt-2 max-h-80 overflow-auto rounded-lg bg-white">
+                  {selected.chapters.map((chapter, index) => (
+                    <button
+                      key={chapter.id}
+                      className="flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-slate-50"
+                      onClick={() => open(selected.id, chapter.id)}
+                    >
+                      <span className="w-9 shrink-0 text-xs text-slate-400">
+                        {index + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-slate-700">
+                        {chapter.title}
+                      </span>
+                      {selected.meta.lastReadChapterId === chapter.id && (
+                        <span className="badge badge-good">last</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </aside>
+          )}
+        </div>
+      )}
     </div>
   );
 }

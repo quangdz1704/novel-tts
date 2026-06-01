@@ -11,6 +11,7 @@ type NovelMeta = {
   author?: string;
   cover?: string;
   url?: string;
+  [key: string]: any;
 };
 
 type LibraryState = {

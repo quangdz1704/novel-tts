@@ -1,6 +1,7 @@
 import { EventEmitter } from '../utils/miniEmitter';
-import type { CrawlJob } from '../crawler/types';
 import { ensureNovelDir, writeJsonFile } from '../storage/fsAdapter';
+import { findAdapter } from '../sources';
+import { extractReadableContent } from '../reader/content';
 
 export type DownloadJob = {
   id: string;
@@ -36,7 +37,7 @@ export class DownloadQueue extends EventEmitter {
       this.download(job).finally(() => {
         this.running--;
         this.emit('done', job);
-        setImmediate(() => this.next());
+        setTimeout(() => this.next(), 0);
       });
     }
   }
@@ -45,17 +46,28 @@ export class DownloadQueue extends EventEmitter {
     job.state = 'downloading';
     this.emit('start', job);
     try {
-      const res = await fetch(job.url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const html = await res.text();
+      const adapter = findAdapter(job.url);
+      let title = job.title;
+      let content = '';
+
+      if (adapter) {
+        const chapter = await adapter.getChapter(job.url);
+        title = chapter.title || title;
+        content = chapter.content;
+      } else {
+        const res = await fetch(job.url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        content = extractReadableContent(await res.text());
+      }
+
       // save chapter as JSON
       const dir = await ensureNovelDir(job.novelId);
       const path = `${dir}/chapters/${job.chapterId}.json`;
       await writeJsonFile(path, {
         id: job.chapterId,
-        title: job.title,
+        title,
         url: job.url,
-        content: html,
+        content: extractReadableContent(content),
       });
       job.state = 'done';
       this.emit('success', job);
