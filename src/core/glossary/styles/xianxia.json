@@ -1,0 +1,8 @@
+[
+  {
+    "find": "xianxia_term",
+    "replace": "Tiên hiệp thuật ngữ",
+    "protected": false
+  },
+  { "find": "sect", "replace": "phái", "protected": false }
+]

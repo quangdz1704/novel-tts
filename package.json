@@ -1,0 +1,37 @@
+{
+  "name": "novel-tts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "playwright:install": "npx playwright install --with-deps",
+    "crawl:demo": "node src/tauri-node/crawler.js --url https://example.com --type metadata --stream",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.4.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.4.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "cheerio": "^1.0.0-rc.12",
+    "minimist": "^1.2.8",
+    "playwright": "^1.44.0",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^3.4.7",
+    "typescript": "^5.1.6",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}

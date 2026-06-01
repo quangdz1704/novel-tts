@@ -1,0 +1,4 @@
+[
+  { "find": "\u5316\u6210", "replace": "hóa thành", "protected": false },
+  { "find": "\u4f4f\u5bb6", "replace": "trú gia", "protected": false }
+]

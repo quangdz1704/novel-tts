@@ -1,0 +1,13 @@
+{
+  "package": {
+    "productName": "novel-tts",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "bundle": {
+      "active": false,
+      "identifier": "com.noveltts.app",
+      "icon": []
+    }
+  }
+}
