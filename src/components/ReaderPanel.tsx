@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useReaderStore } from "../core/reader/readerStore";
-import { htmlToText, sanitizeHtml } from "../core/reader/content";
+import { htmlToReadableBlocks, sanitizeHtml } from "../core/reader/content";
 import { browserTTS } from "../core/tts/browserTTS";
 import { useSettingsStore } from "../stores/settingsStore";
 import { getNovelMetadata } from "../core/storage/indexeddb";
@@ -27,6 +27,14 @@ export default function ReaderPanel({
   const setLineHeight = useSettingsStore((s) => s.setLineHeight);
   const setReaderTheme = useSettingsStore((s) => s.setReaderTheme);
   const setFontFamily = useSettingsStore((s) => s.setFontFamily);
+  const ttsRate = useSettingsStore((s) => s.ttsRate);
+  const ttsPitch = useSettingsStore((s) => s.ttsPitch);
+  const ttsVolume = useSettingsStore((s) => s.ttsVolume);
+  const ttsVoiceURI = useSettingsStore((s) => s.ttsVoiceURI);
+  const setTtsRate = useSettingsStore((s) => s.setTtsRate);
+  const setTtsPitch = useSettingsStore((s) => s.setTtsPitch);
+  const setTtsVolume = useSettingsStore((s) => s.setTtsVolume);
+  const setTtsVoiceURI = useSettingsStore((s) => s.setTtsVoiceURI);
   const [ttsActive, setTtsActive] = useState(false);
   const [showPrefs, setShowPrefs] = useState(false);
   const [showChrome, setShowChrome] = useState(true);
@@ -38,12 +46,11 @@ export default function ReaderPanel({
   } | null>(null);
   const [currentChapter, setCurrentChapter] = useState<any>(null);
   const [nextChapter, setNextChapter] = useState<any>(null);
-
-  const stateB = useReaderStore((s) => s);
-
-  console.log("stateB", meta);
+  const [ttsBlockIndex, setTtsBlockIndex] = useState<number | null>(null);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const ttsBlockCountRef = useRef(0);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -137,16 +144,97 @@ export default function ReaderPanel({
     () => (content ? sanitizeHtml(content) : ""),
     [content],
   );
+  const readableBlocks = useMemo(
+    () => (safeContent ? htmlToReadableBlocks(safeContent) : []),
+    [safeContent],
+  );
+
+  useEffect(() => {
+    const updateVoices = () => {
+      const availableVoices = browserTTS.getVoices();
+      const currentVoiceURI = useSettingsStore.getState().ttsVoiceURI;
+      setVoices(availableVoices);
+      const nextVoiceURI =
+        currentVoiceURI &&
+        availableVoices.some((voice) => voice.voiceURI === currentVoiceURI)
+          ? currentVoiceURI
+          : availableVoices.find(
+              (voice) => voice.lang.toLowerCase() === "vi-vn",
+            )?.voiceURI ||
+            availableVoices.find((voice) =>
+              voice.lang.toLowerCase().startsWith("vi"),
+            )?.voiceURI ||
+            "";
+      if (nextVoiceURI !== currentVoiceURI) setTtsVoiceURI(nextVoiceURI);
+    };
+
+    updateVoices();
+    return browserTTS.onVoicesChanged(updateVoices);
+  }, [setTtsVoiceURI]);
+
+  useEffect(() => {
+    browserTTS.onProgress((info) => {
+      if (info.status === "start" || info.status === "boundary") {
+        setTtsBlockIndex(info.utteranceIndex);
+      }
+      if (
+        info.status === "end" &&
+        info.utteranceIndex === ttsBlockCountRef.current - 1
+      ) {
+        setTtsActive(false);
+        setTtsBlockIndex(null);
+      }
+      if (info.status === "error") {
+        setTtsActive(false);
+      }
+    });
+
+    return () => {
+      browserTTS.onProgress(undefined);
+      browserTTS.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (ttsBlockIndex == null || !containerRef.current) return;
+    const block = containerRef.current.querySelector<HTMLElement>(
+      `[data-tts-block="${ttsBlockIndex}"]`,
+    );
+    if (!block) return;
+
+    const container = containerRef.current;
+    const blockTop = block.offsetTop;
+    const blockBottom = blockTop + block.offsetHeight;
+    const visibleTop = container.scrollTop + 80;
+    const visibleBottom = container.scrollTop + container.clientHeight - 80;
+
+    if (blockTop < visibleTop || blockBottom > visibleBottom) {
+      container.scrollTo({
+        top: Math.max(0, blockTop - container.clientHeight * 0.35),
+        behavior: "smooth",
+      });
+    }
+  }, [ttsBlockIndex]);
 
   const readCurrent = () => {
-    if (!safeContent) return;
-    browserTTS.speak(htmlToText(safeContent), { rate: 1, pitch: 1, volume: 1 });
+    const texts = readableBlocks.map((block) => block.text).filter(Boolean);
+    if (!texts.length) return;
+    ttsBlockCountRef.current = texts.length;
+    setTtsBlockIndex(0);
+    browserTTS.speak(texts, {
+      rate: ttsRate,
+      pitch: ttsPitch,
+      volume: ttsVolume,
+      lang: "vi-VN",
+      voiceURI: ttsVoiceURI,
+    });
     setTtsActive(true);
   };
 
   const stopReading = () => {
     browserTTS.stop();
     setTtsActive(false);
+    setTtsBlockIndex(null);
   };
 
   const openNext = async () => {
@@ -252,6 +340,54 @@ export default function ReaderPanel({
               onChange={(e) => setLineHeight(Number(e.target.value))}
             />
           </label>
+          <label className="grid gap-2 text-sm text-[var(--muted)]">
+            TTS voice
+            <select
+              className="field-input w-full"
+              value={ttsVoiceURI}
+              onChange={(e) => setTtsVoiceURI(e.target.value)}
+            >
+              <option value="">Auto Vietnamese</option>
+              {voices.map((voice) => (
+                <option key={voice.voiceURI} value={voice.voiceURI}>
+                  {voice.name} ({voice.lang})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-2 text-sm text-[var(--muted)]">
+            Rate: {ttsRate}
+            <input
+              type="range"
+              min="0.5"
+              max="4"
+              step="0.1"
+              value={ttsRate}
+              onChange={(e) => setTtsRate(Number(e.target.value))}
+            />
+          </label>
+          <label className="grid gap-2 text-sm text-[var(--muted)]">
+            Pitch: {ttsPitch}
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.1"
+              value={ttsPitch}
+              onChange={(e) => setTtsPitch(Number(e.target.value))}
+            />
+          </label>
+          <label className="grid gap-2 text-sm text-[var(--muted)]">
+            Volume: {ttsVolume}
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={ttsVolume}
+              onChange={(e) => setTtsVolume(Number(e.target.value))}
+            />
+          </label>
         </div>
       )}
 
@@ -295,7 +431,20 @@ export default function ReaderPanel({
             >
               {showChrome ? "Focus" : "Menu"}
             </button>
-            <div dangerouslySetInnerHTML={{ __html: safeContent }} />
+            <div>
+              {readableBlocks.map((block, index) => (
+                <div
+                  key={index}
+                  data-tts-block={index}
+                  className={
+                    ttsBlockIndex === index
+                      ? "reader-tts-block reader-tts-block-active"
+                      : "reader-tts-block"
+                  }
+                  dangerouslySetInnerHTML={{ __html: block.html }}
+                />
+              ))}
+            </div>
           </article>
         ) : (
           <div className="reader-empty">

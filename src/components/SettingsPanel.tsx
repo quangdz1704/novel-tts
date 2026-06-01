@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { useSettingsStore } from '../stores/settingsStore';
+import React, { useEffect } from "react";
+import { useSettingsStore } from "../stores/settingsStore";
 
 export default function SettingsPanel() {
   const theme = useSettingsStore((s) => s.theme);
@@ -24,22 +24,24 @@ export default function SettingsPanel() {
       <h2 className="panel-title">Settings</h2>
       <div className="mt-3">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm font-medium text-[var(--muted)]">App theme</label>
+          <label className="text-sm font-medium text-[var(--muted)]">
+            App theme:
+          </label>
           <button
-            className={theme === 'system' ? 'secondary-button' : 'ghost-button'}
-            onClick={() => setTheme('system')}
+            className={theme === "system" ? "secondary-button" : "ghost-button"}
+            onClick={() => setTheme("system")}
           >
             System
           </button>
           <button
-            className={theme === 'light' ? 'secondary-button' : 'ghost-button'}
-            onClick={() => setTheme('light')}
+            className={theme === "light" ? "secondary-button" : "ghost-button"}
+            onClick={() => setTheme("light")}
           >
             Light
           </button>
           <button
-            className={theme === 'dark' ? 'secondary-button' : 'ghost-button'}
-            onClick={() => setTheme('dark')}
+            className={theme === "dark" ? "secondary-button" : "ghost-button"}
+            onClick={() => setTheme("dark")}
           >
             Dark
           </button>

@@ -209,6 +209,30 @@ button:disabled {
     @apply mb-4;
   }
 
+  .reader-tts-block {
+    border-radius: 10px;
+    margin-inline: -0.75rem;
+    padding-inline: 0.75rem;
+    transition:
+      background-color 160ms ease,
+      box-shadow 160ms ease,
+      color 160ms ease;
+  }
+
+  .reader-tts-block-active {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    box-shadow:
+      inset 4px 0 0 var(--accent),
+      0 10px 30px rgba(2, 132, 199, 0.14);
+  }
+
+  .reader-theme-paper .reader-tts-block-active {
+    background: rgba(250, 204, 21, 0.18);
+    box-shadow:
+      inset 4px 0 0 #facc15,
+      0 10px 30px rgba(120, 53, 15, 0.12);
+  }
+
   .reader-empty {
     @apply flex h-full flex-col items-center justify-center text-center;
   }

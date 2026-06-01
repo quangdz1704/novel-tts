@@ -24,6 +24,23 @@ const CONTENT_SELECTORS = [
   'main',
 ];
 
+const READABLE_BLOCK_SELECTOR = [
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+].join(',');
+
+export type ReadableBlock = {
+  html: string;
+  text: string;
+};
+
 export function toSafeId(value: string, fallback = 'item') {
   const safe = value
     .toLowerCase()
@@ -80,4 +97,45 @@ export function htmlToText(html: string) {
   const div = document.createElement('div');
   div.innerHTML = sanitizeHtml(html);
   return (div.textContent || div.innerText || '').replace(/\s+/g, ' ').trim();
+}
+
+export function htmlToReadableBlocks(html: string): ReadableBlock[] {
+  const safeHtml = sanitizeHtml(html);
+  if (typeof document === 'undefined') {
+    return htmlToText(safeHtml)
+      .split(/\n{2,}/)
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .map((text) => ({ html: text, text }));
+  }
+
+  const template = document.createElement('template');
+  template.innerHTML = safeHtml;
+  const blockEls = Array.from(
+    template.content.querySelectorAll<HTMLElement>(READABLE_BLOCK_SELECTOR),
+  );
+
+  const blocks = blockEls
+    .map((el) => ({
+      html: el.outerHTML,
+      text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+    }))
+    .filter((block) => block.text);
+
+  if (blocks.length) return blocks;
+
+  return htmlToText(safeHtml)
+    .split(/\n+/)
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .map((text) => ({ html: `<p>${escapeHtml(text)}</p>`, text }));
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
