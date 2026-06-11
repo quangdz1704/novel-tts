@@ -1,50 +1,18 @@
 import type { SourceAdapter } from './SourceAdapter';
 import { extractReadableContent } from '../reader/content';
+import { parseBrowserHtml } from './parsers/browserHtml';
+import {
+  findFirstWikiCvChapter,
+  getWikiCvChapterLinks,
+  parseWikiCvChapter,
+  parseWikiCvNovel,
+} from './parsers/wikicv';
 
 const BASE_URL = 'https://wikicv.net';
 const MAX_DISCOVERY_CHAPTERS = 3000;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function absolute(href: string, base: string) {
-  try {
-    return new URL(href, base).href;
-  } catch (e) {
-    return href;
-  }
-}
-
-function getDoc(html: string) {
-  return new DOMParser().parseFromString(html, 'text/html');
-}
-
-function getInfoLine(text: string, label: string) {
-  const re = new RegExp(`${label}:\\s*([^\\n]+)`, 'i');
-  return text.match(re)?.[1]?.trim();
-}
-
-function uniqueChapterLinks(doc: Document, baseUrl: string) {
-  const seen = new Set<string>();
-  return Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))
-    .map((a) => ({
-      id: absolute(a.getAttribute('href') || '', baseUrl),
-      title: a.textContent?.trim() || '',
-      url: absolute(a.getAttribute('href') || '', baseUrl),
-    }))
-    .filter((item) => /\/truyen\/[^/]+\/chuong-/.test(item.url))
-    .filter((item) => {
-      if (seen.has(item.url)) return false;
-      seen.add(item.url);
-      return true;
-    });
-}
-
-function nextChapterUrl(doc: Document, baseUrl: string) {
-  const links = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'));
-  const next = links.find((a) => /chương sau/i.test(a.textContent || ''));
-  return next ? absolute(next.getAttribute('href') || '', baseUrl) : undefined;
 }
 
 export const wikicvAdapter: SourceAdapter = {
@@ -80,50 +48,15 @@ export const wikicvAdapter: SourceAdapter = {
   async getNovel(url: string) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`WikiCV metadata failed: HTTP ${res.status}`);
-    const html = await res.text();
-    const doc = getDoc(html);
-    const info = doc.querySelector('.book-info');
-    const infoText = info?.textContent?.replace(/[ \t]+/g, ' ') || '';
-    const title =
-      info?.querySelector('h2')?.textContent?.trim() ||
-      doc.querySelector('title')?.textContent?.trim() ||
-      '';
-    const cover = doc
-      .querySelector<HTMLImageElement>('.book-info img')
-      ?.getAttribute('src');
-    const latest = uniqueChapterLinks(doc, url).find((ch) =>
-      /chuong-\d+/i.test(ch.url),
-    );
-
-    return {
-      id: url,
-      title,
-      cover: cover ? absolute(cover, url) : undefined,
-      source: this.id,
-      sourceHost: new URL(url).hostname,
-      sourceUrl: url,
-      author: getInfoLine(infoText, 'Tác giả'),
-      summary:
-        doc.querySelector('.book-desc, .desc, #bookDescription')
-          ?.textContent?.trim() || undefined,
-      status: getInfoLine(infoText, 'Tình trạng'),
-      latestChapter: latest?.title,
-      chapterCount: latest?.title.match(/Chương\s+(\d+)/i)?.[1]
-        ? Number(latest.title.match(/Chương\s+(\d+)/i)?.[1])
-        : undefined,
-      url,
-    };
+    return parseWikiCvNovel(parseBrowserHtml(await res.text()), url);
   },
 
   async getChapters(novelUrl: string, opts: { maxChapters?: number } = {}) {
     const res = await fetch(novelUrl);
     if (!res.ok) throw new Error(`WikiCV chapter list failed: HTTP ${res.status}`);
-    const html = await res.text();
-    const doc = getDoc(html);
-    const first = uniqueChapterLinks(doc, novelUrl).find((ch) =>
-      /chuong-1-/i.test(ch.url),
-    );
-    if (!first) return uniqueChapterLinks(doc, novelUrl);
+    const documentNode = parseBrowserHtml(await res.text());
+    const first = findFirstWikiCvChapter(documentNode, novelUrl);
+    if (!first) return getWikiCvChapterLinks(documentNode, novelUrl);
 
     const chapters: Array<{ id: string; title: string; url: string }> = [];
     const seen = new Set<string>();
@@ -138,20 +71,19 @@ export const wikicvAdapter: SourceAdapter = {
       seen.add(currentUrl);
       const chapterRes = await fetch(currentUrl);
       if (!chapterRes.ok) break;
-      const chapterHtml = await chapterRes.text();
-      const chapterDoc = getDoc(chapterHtml);
-      const title =
-        chapterDoc.querySelector('.chapter-name')?.textContent?.trim() ||
-        chapterDoc.querySelector('title')?.textContent?.trim() ||
-        `Chapter ${chapters.length + 1}`;
+      const chapter = parseWikiCvChapter(
+        parseBrowserHtml(await chapterRes.text()),
+        currentUrl,
+        chapters.length + 1,
+      );
       chapters.push({
         id: currentUrl,
-        title,
+        title: chapter.title,
         url: currentUrl,
       });
 
       if (chapters.length >= limit) break;
-      currentUrl = nextChapterUrl(chapterDoc, currentUrl);
+      currentUrl = chapter.nextUrl;
       if (currentUrl) await delay(120);
     }
 
@@ -161,17 +93,14 @@ export const wikicvAdapter: SourceAdapter = {
   async getChapter(chapterUrl: string) {
     const res = await fetch(chapterUrl);
     if (!res.ok) throw new Error(`WikiCV chapter failed: HTTP ${res.status}`);
-    const html = await res.text();
-    const doc = getDoc(html);
-    const title =
-      doc.querySelector('.chapter-name')?.textContent?.trim() ||
-      doc.querySelector('title')?.textContent?.trim() ||
-      '';
-    const contentEl = doc.querySelector('#bookContent') || doc.body;
+    const chapter = parseWikiCvChapter(
+      parseBrowserHtml(await res.text()),
+      chapterUrl,
+    );
     return {
       id: chapterUrl,
-      title,
-      content: extractReadableContent(contentEl?.innerHTML || html),
+      title: chapter.title,
+      content: extractReadableContent(chapter.content),
     };
   },
 };

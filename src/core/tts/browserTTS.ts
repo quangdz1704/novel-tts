@@ -4,12 +4,18 @@ type ProgressCallback = (info: {
   status: 'start' | 'boundary' | 'end' | 'error';
 }) => void;
 
+type StateCallback = (state: {
+  speaking: boolean;
+  paused: boolean;
+}) => void;
+
 type SpeakOptions = {
   rate?: number;
   pitch?: number;
   volume?: number;
   lang?: string;
   voiceURI?: string;
+  utteranceOffset?: number;
 };
 
 export class BrowserTTS {
@@ -19,13 +25,16 @@ export class BrowserTTS {
       : null;
   private queue: SpeechSynthesisUtterance[] = [];
   private isSpeaking = false;
+  private isPaused = false;
   private progressCb?: ProgressCallback;
+  private stateCb?: StateCallback;
 
   speak(text: string | string[], opts: SpeakOptions = {}) {
     if (!this.synth) return;
     this.stop();
     const chunks = Array.isArray(text) ? text.filter(Boolean) : this.splitSentences(text);
     const voice = this.pickVoice(opts.lang ?? 'vi-VN', opts.voiceURI);
+    const utteranceOffset = opts.utteranceOffset ?? 0;
     this.queue = chunks.map((s) => {
       const u = new SpeechSynthesisUtterance(s);
       u.lang = voice?.lang || opts.lang || 'vi-VN';
@@ -37,50 +46,68 @@ export class BrowserTTS {
     });
 
     this.queue.forEach((u, idx) => {
+      const utteranceIndex = utteranceOffset + idx;
       u.onstart = () => {
-        this.progressCb?.({ charIndex: 0, utteranceIndex: idx, status: 'start' });
+        this.isSpeaking = true;
+        this.isPaused = false;
+        this.emitState();
+        this.progressCb?.({ charIndex: 0, utteranceIndex, status: 'start' });
       };
       u.onboundary = (ev: any) => {
         if (ev && ev.charIndex != null)
           this.progressCb?.({
             charIndex: ev.charIndex,
-            utteranceIndex: idx,
+            utteranceIndex,
             status: 'boundary',
           });
       };
       u.onend = () => {
         this.progressCb?.({
           charIndex: u.text.length,
-          utteranceIndex: idx,
+          utteranceIndex,
           status: 'end',
         });
         if (idx === this.queue.length - 1) {
           this.isSpeaking = false;
+          this.isPaused = false;
+          this.emitState();
         }
       };
       u.onerror = () => {
         this.progressCb?.({
           charIndex: 0,
-          utteranceIndex: idx,
+          utteranceIndex,
           status: 'error',
         });
         if (idx === this.queue.length - 1) {
           this.isSpeaking = false;
+          this.isPaused = false;
+          this.emitState();
         }
       };
       this.synth!.speak(u);
     });
     this.isSpeaking = true;
+    this.isPaused = false;
+    this.emitState();
   }
 
   pause() {
     if (!this.synth) return;
-    if (this.synth.speaking) this.synth.pause();
+    if (this.synth.speaking) {
+      this.synth.pause();
+      this.isPaused = true;
+      this.emitState();
+    }
   }
 
   resume() {
     if (!this.synth) return;
-    if (this.synth.paused) this.synth.resume();
+    if (this.synth.paused) {
+      this.synth.resume();
+      this.isPaused = false;
+      this.emitState();
+    }
   }
 
   stop() {
@@ -88,10 +115,24 @@ export class BrowserTTS {
     this.synth.cancel();
     this.queue = [];
     this.isSpeaking = false;
+    this.isPaused = false;
+    this.emitState();
   }
 
   onProgress(cb: ProgressCallback | undefined) {
     this.progressCb = cb;
+  }
+
+  onState(cb: StateCallback | undefined) {
+    this.stateCb = cb;
+    if (cb) this.emitState();
+  }
+
+  getState() {
+    return {
+      speaking: this.isSpeaking,
+      paused: this.isPaused,
+    };
   }
 
   getVoices() {
@@ -119,6 +160,13 @@ export class BrowserTTS {
       voices.find((voice) => voice.default) ||
       voices[0]
     );
+  }
+
+  private emitState() {
+    this.stateCb?.({
+      speaking: this.isSpeaking,
+      paused: this.isPaused,
+    });
   }
 
   private splitSentences(text: string) {

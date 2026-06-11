@@ -1,5 +1,8 @@
 import { EventEmitter } from '../utils/miniEmitter';
-import { ensureNovelDir, writeJsonFile } from '../storage/fsAdapter';
+import {
+  ensureNovelDir,
+  writeJsonFile,
+} from '../storage/localLibraryStorage';
 import { findAdapter } from '../sources';
 import { extractReadableContent } from '../reader/content';
 

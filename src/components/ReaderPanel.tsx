@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReaderStore } from "../core/reader/readerStore";
 import { htmlToReadableBlocks, sanitizeHtml } from "../core/reader/content";
 import { browserTTS } from "../core/tts/browserTTS";
 import { useSettingsStore } from "../stores/settingsStore";
 import { getNovelMetadata } from "../core/storage/indexeddb";
 import BookCover from "./BookCover";
+import { glossaryManager } from "../core/glossary/manager";
 
 export default function ReaderPanel({
   onBackToLibrary,
@@ -36,6 +37,7 @@ export default function ReaderPanel({
   const setTtsVolume = useSettingsStore((s) => s.setTtsVolume);
   const setTtsVoiceURI = useSettingsStore((s) => s.setTtsVoiceURI);
   const [ttsActive, setTtsActive] = useState(false);
+  const [ttsPaused, setTtsPaused] = useState(false);
   const [showPrefs, setShowPrefs] = useState(false);
   const [showChrome, setShowChrome] = useState(true);
   const [nearEnd, setNearEnd] = useState(false);
@@ -47,10 +49,16 @@ export default function ReaderPanel({
   const [currentChapter, setCurrentChapter] = useState<any>(null);
   const [nextChapter, setNextChapter] = useState<any>(null);
   const [ttsBlockIndex, setTtsBlockIndex] = useState<number | null>(null);
+  const [ttsStartBlockIndex, setTtsStartBlockIndex] = useState(0);
+  const [autoReadNext, setAutoReadNext] = useState(false);
+  const [pendingAutoRead, setPendingAutoRead] = useState(false);
+  const [glossaryEnabled, setGlossaryEnabled] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const ttsBlockCountRef = useRef(0);
+  const autoReadNextRef = useRef(false);
+  const nextChapterRef = useRef<any>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -144,10 +152,47 @@ export default function ReaderPanel({
     () => (content ? sanitizeHtml(content) : ""),
     [content],
   );
+  const glossaryContent = useMemo(() => {
+    if (!safeContent || !glossaryEnabled) return safeContent;
+    if (typeof document === "undefined") {
+      return glossaryManager.applyGlossary(safeContent, {
+        novelId,
+        style: "xianxia",
+      });
+    }
+
+    const template = document.createElement("template");
+    template.innerHTML = safeContent;
+    const walker = document.createTreeWalker(
+      template.content,
+      NodeFilter.SHOW_TEXT,
+    );
+    let node = walker.nextNode();
+    while (node) {
+      node.nodeValue = glossaryManager.applyGlossary(node.nodeValue || "", {
+        novelId,
+        style: "xianxia",
+      });
+      node = walker.nextNode();
+    }
+    return template.innerHTML;
+  }, [glossaryEnabled, novelId, safeContent]);
   const readableBlocks = useMemo(
-    () => (safeContent ? htmlToReadableBlocks(safeContent) : []),
-    [safeContent],
+    () => (glossaryContent ? htmlToReadableBlocks(glossaryContent) : []),
+    [glossaryContent],
   );
+
+  useEffect(() => {
+    ttsBlockCountRef.current = readableBlocks.length;
+  }, [readableBlocks.length]);
+
+  useEffect(() => {
+    autoReadNextRef.current = autoReadNext;
+  }, [autoReadNext]);
+
+  useEffect(() => {
+    nextChapterRef.current = nextChapter;
+  }, [nextChapter]);
 
   useEffect(() => {
     const updateVoices = () => {
@@ -182,18 +227,31 @@ export default function ReaderPanel({
         info.utteranceIndex === ttsBlockCountRef.current - 1
       ) {
         setTtsActive(false);
+        setTtsPaused(false);
         setTtsBlockIndex(null);
+        if (autoReadNextRef.current && nextChapterRef.current) {
+          setPendingAutoRead(true);
+          void openChapter(novelId, nextChapterRef.current.id).then(() => {
+            if (containerRef.current) containerRef.current.scrollTop = 0;
+          });
+        }
       }
       if (info.status === "error") {
         setTtsActive(false);
+        setTtsPaused(false);
       }
+    });
+    browserTTS.onState((state) => {
+      setTtsActive(state.speaking);
+      setTtsPaused(state.paused);
     });
 
     return () => {
       browserTTS.onProgress(undefined);
+      browserTTS.onState(undefined);
       browserTTS.stop();
     };
-  }, []);
+  }, [novelId, openChapter]);
 
   useEffect(() => {
     if (ttsBlockIndex == null || !containerRef.current) return;
@@ -216,38 +274,118 @@ export default function ReaderPanel({
     }
   }, [ttsBlockIndex]);
 
-  const readCurrent = () => {
-    const texts = readableBlocks.map((block) => block.text).filter(Boolean);
-    if (!texts.length) return;
-    ttsBlockCountRef.current = texts.length;
-    setTtsBlockIndex(0);
-    browserTTS.speak(texts, {
-      rate: ttsRate,
-      pitch: ttsPitch,
-      volume: ttsVolume,
-      lang: "vi-VN",
-      voiceURI: ttsVoiceURI,
+  const getVisibleBlockIndex = useCallback(() => {
+    if (!containerRef.current || readableBlocks.length === 0) return 0;
+    const container = containerRef.current;
+    const targetTop = container.scrollTop + container.clientHeight * 0.32;
+    let bestIndex = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    readableBlocks.forEach((_block, index) => {
+      const el = container.querySelector<HTMLElement>(
+        `[data-tts-block="${index}"]`,
+      );
+      if (!el) return;
+      const distance = Math.abs(el.offsetTop - targetTop);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
     });
-    setTtsActive(true);
+
+    return bestIndex;
+  }, [readableBlocks]);
+
+  const playFromBlock = useCallback(
+    (startIndex: number) => {
+      const normalizedStart = Math.max(
+        0,
+        Math.min(startIndex, readableBlocks.length - 1),
+      );
+      const texts = readableBlocks
+        .slice(normalizedStart)
+        .map((block) => block.text)
+        .filter(Boolean);
+      if (!texts.length) return;
+      ttsBlockCountRef.current = readableBlocks.length;
+      setTtsStartBlockIndex(normalizedStart);
+      setTtsBlockIndex(normalizedStart);
+      setTtsPaused(false);
+      browserTTS.speak(texts, {
+        rate: ttsRate,
+        pitch: ttsPitch,
+        volume: ttsVolume,
+        lang: "vi-VN",
+        voiceURI: ttsVoiceURI,
+        utteranceOffset: normalizedStart,
+      });
+      setTtsActive(true);
+    },
+    [readableBlocks, ttsPitch, ttsRate, ttsVoiceURI, ttsVolume],
+  );
+
+  const hasReadableBlocks = readableBlocks.length > 0;
+
+  useEffect(() => {
+    if (!pendingAutoRead || !autoReadNext || !hasReadableBlocks) return;
+    setPendingAutoRead(false);
+    playFromBlock(0);
+  }, [autoReadNext, hasReadableBlocks, pendingAutoRead, playFromBlock]);
+
+  const readCurrent = () => {
+    playFromBlock(0);
+  };
+
+  const readFromVisible = () => {
+    playFromBlock(getVisibleBlockIndex());
+  };
+
+  const pauseReading = () => {
+    browserTTS.pause();
+  };
+
+  const resumeReading = () => {
+    browserTTS.resume();
+  };
+
+  const jumpReading = (direction: -1 | 1) => {
+    const baseIndex = ttsBlockIndex ?? getVisibleBlockIndex();
+    playFromBlock(baseIndex + direction);
   };
 
   const stopReading = () => {
     browserTTS.stop();
     setTtsActive(false);
+    setTtsPaused(false);
     setTtsBlockIndex(null);
   };
 
   const openNext = async () => {
     if (!nextChapter) return;
+    stopReading();
     await openChapter(novelId, nextChapter.id);
     if (containerRef.current) containerRef.current.scrollTop = 0;
   };
+
+  const ttsProgress =
+    ttsBlockIndex == null || readableBlocks.length === 0
+      ? 0
+      : Math.round(((ttsBlockIndex + 1) / readableBlocks.length) * 100);
+
+  const currentTtsBlockLabel =
+    ttsBlockIndex == null ? ttsStartBlockIndex + 1 : ttsBlockIndex + 1;
 
   return (
     <div className="reader-panel">
       {showChrome && (
         <div className="reader-toolbar">
-          <button className="ghost-button" onClick={onBackToLibrary}>
+          <button
+            className="ghost-button"
+            onClick={() => {
+              stopReading();
+              onBackToLibrary?.();
+            }}
+          >
             Library
           </button>
           <div className="min-w-0 flex-1 text-center">
@@ -278,10 +416,10 @@ export default function ReaderPanel({
             </button>
             <button
               className="secondary-button"
-              onClick={readCurrent}
-              disabled={!safeContent}
+              onClick={readFromVisible}
+              disabled={!hasReadableBlocks}
             >
-              TTS
+              Listen
             </button>
             <button
               className="ghost-button"
@@ -290,6 +428,93 @@ export default function ReaderPanel({
             >
               Stop
             </button>
+          </div>
+        </div>
+      )}
+
+      {showChrome && safeContent && (
+        <div className="reader-player">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+              <span className="font-semibold uppercase tracking-wide">
+                Voice player
+              </span>
+              <span>
+                Block {Math.min(currentTtsBlockLabel, readableBlocks.length)} of{" "}
+                {readableBlocks.length}
+              </span>
+              {ttsActive && (
+                <span className="badge badge-good">
+                  {ttsPaused ? "paused" : "playing"}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/20">
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-all"
+                style={{ width: `${ttsProgress}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="reader-player-actions">
+            <button
+              className="secondary-button"
+              onClick={readCurrent}
+              disabled={!hasReadableBlocks}
+              title="Read from chapter start"
+            >
+              Start
+            </button>
+            <button
+              className="secondary-button"
+              onClick={readFromVisible}
+              disabled={!hasReadableBlocks}
+              title="Read from visible paragraph"
+            >
+              Here
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => jumpReading(-1)}
+              disabled={!hasReadableBlocks}
+              title="Previous paragraph"
+            >
+              Prev
+            </button>
+            {ttsPaused ? (
+              <button
+                className="primary-button"
+                onClick={resumeReading}
+                disabled={!ttsActive}
+              >
+                Resume
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                onClick={pauseReading}
+                disabled={!ttsActive}
+              >
+                Pause
+              </button>
+            )}
+            <button
+              className="ghost-button"
+              onClick={() => jumpReading(1)}
+              disabled={!hasReadableBlocks}
+              title="Next paragraph"
+            >
+              Next
+            </button>
+            <label className="reader-player-toggle">
+              <input
+                type="checkbox"
+                checked={autoReadNext}
+                onChange={(e) => setAutoReadNext(e.target.checked)}
+              />
+              Auto next
+            </label>
           </div>
         </div>
       )}
@@ -354,6 +579,14 @@ export default function ReaderPanel({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="reader-player-toggle self-end">
+            <input
+              type="checkbox"
+              checked={glossaryEnabled}
+              onChange={(e) => setGlossaryEnabled(e.target.checked)}
+            />
+            Xianxia glossary
           </label>
           <label className="grid gap-2 text-sm text-[var(--muted)]">
             Rate: {ttsRate}

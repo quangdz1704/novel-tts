@@ -1,12 +1,20 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { listChapters, listNovels } from "../core/storage/fsAdapter";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ensureNovelDir,
+  listChapters,
+  listNovels,
+  writeJsonFile,
+} from "../core/storage/localLibraryStorage";
 import {
   listNovelsMetadata,
   listReadingProgress,
+  saveNovelMetadata,
 } from "../core/storage/indexeddb";
 import NovelCard from "./NovelCard";
 import { useReaderStore } from "../core/reader/readerStore";
 import BookCover from "./BookCover";
+import { DownloadQueue, type DownloadJob } from "../core/jobs/downloadQueue";
+import { findAdapter, getSourceInfo } from "../core/sources";
 
 type SortMode = "recentRead" | "recentCrawl" | "title";
 
@@ -24,12 +32,17 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
   const [selectedId, setSelectedId] = useState<string>();
   const [sort, setSort] = useState<SortMode>("recentRead");
   const [loading, setLoading] = useState(true);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [updateJobs, setUpdateJobs] = useState<DownloadJob[]>([]);
+  const [updateMessage, setUpdateMessage] = useState("");
+  const downloadRef = useRef<DownloadQueue | null>(null);
   const openChapter = useReaderStore((s) => s.openChapter);
 
-  useEffect(() => {
+  const loadLibrary = useCallback(() => {
     let mounted = true;
     (async () => {
       try {
+        setLoading(true);
         const [files, dbMeta, progressRows] = await Promise.all([
           listNovels(),
           listNovelsMetadata(),
@@ -90,6 +103,23 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
     };
   }, []);
 
+  useEffect(() => loadLibrary(), [loadLibrary]);
+
+  useEffect(() => {
+    const dq = new DownloadQueue(3);
+    dq.on("enqueue", (job: DownloadJob) => setUpdateJobs((s) => [...s, job]));
+    dq.on("start", (job: DownloadJob) =>
+      setUpdateJobs((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
+    );
+    dq.on("success", (job: DownloadJob) =>
+      setUpdateJobs((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
+    );
+    dq.on("failed", (job: DownloadJob) =>
+      setUpdateJobs((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
+    );
+    downloadRef.current = dq;
+  }, []);
+
   const sorted = useMemo(() => {
     return [...novels].sort((a, b) => {
       if (sort === "title") {
@@ -115,6 +145,96 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
     openChapter(novelId, chapterId);
     onRead?.();
   };
+
+  const updateSelected = async () => {
+    if (!selected || updatingId) return;
+    const sourceUrl = selected.meta.sourceUrl || selected.meta.url;
+    const adapter = sourceUrl ? findAdapter(sourceUrl) : undefined;
+    if (!sourceUrl || !adapter) {
+      setUpdateMessage("This novel has no supported source URL to update.");
+      return;
+    }
+
+    setUpdatingId(selected.id);
+    setUpdateJobs([]);
+    setUpdateMessage("Checking latest chapter list...");
+    try {
+      const [freshMeta, sourceChapters, storedChapters] = await Promise.all([
+        adapter.getNovel(sourceUrl),
+        adapter.getChapters(sourceUrl, { maxChapters: 0 }),
+        listChapters(selected.id),
+      ]);
+      const chapters = sourceChapters.map((chapter, index) => ({
+        ...chapter,
+        id: `ch_${String(index + 1).padStart(4, "0")}`,
+      }));
+      const stored = new Set(storedChapters);
+      const missing = chapters.filter((chapter) => !stored.has(chapter.id));
+      const nextMeta = {
+        ...selected.meta,
+        ...freshMeta,
+        ...getSourceInfo(sourceUrl, adapter),
+        id: selected.id,
+        url: sourceUrl,
+        sourceUrl,
+        chapters,
+        chapterCount: chapters.length,
+        lastCrawledAt: new Date().toISOString(),
+      };
+
+      await saveNovelMetadata(selected.id, nextMeta);
+      try {
+        const dir = await ensureNovelDir(selected.id);
+        await writeJsonFile(`${dir}/metadata.json`, nextMeta);
+      } catch (e) {}
+
+      setNovels((items) =>
+        items.map((item) =>
+          item.id === selected.id
+            ? {
+                ...item,
+                meta: nextMeta,
+                chapters,
+                chapterCount: chapters.length,
+                firstChapter:
+                  item.progress?.chapterId || chapters[0]?.id || item.firstChapter,
+              }
+            : item,
+        ),
+      );
+
+      if (missing.length === 0) {
+        setUpdateMessage("Library is already up to date.");
+        return;
+      }
+
+      missing.forEach((chapter) => {
+        downloadRef.current?.add({
+          id: chapter.url,
+          novelId: selected.id,
+          chapterId: chapter.id,
+          title: chapter.title,
+          url: chapter.url,
+          attempts: 0,
+          state: "pending",
+        });
+      });
+      setUpdateMessage(`Found ${missing.length} new chapters. Download started.`);
+    } catch (e) {
+      setUpdateMessage(`Update failed: ${String(e)}`);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const updateDoneCount = updateJobs.filter((job) => job.state === "done").length;
+  const updateFailedCount = updateJobs.filter(
+    (job) => job.state === "failed",
+  ).length;
+  const updateProgress =
+    updateJobs.length > 0
+      ? Math.round((updateDoneCount / updateJobs.length) * 100)
+      : 0;
 
   return (
     <div className="library-shell">
@@ -196,12 +316,35 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
                   </button>
                   <button
                     className="secondary-button"
-                    disabled
-                    title="Coming soon"
+                    onClick={updateSelected}
+                    disabled={Boolean(updatingId)}
+                    title="Check source for new chapters"
                   >
-                    Update
+                    {updatingId === selected.id ? "Updating..." : "Update"}
                   </button>
                 </div>
+
+                {updateMessage && (
+                  <div className="mt-3 rounded-xl bg-[var(--panel-elevated)] p-3 text-sm text-[var(--muted)]">
+                    {updateMessage}
+                    {updateJobs.length > 0 && (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span>
+                            {updateDoneCount}/{updateJobs.length} saved
+                          </span>
+                          <span>{updateFailedCount} failed</span>
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/20">
+                          <div
+                            className="h-full rounded-full bg-[var(--accent)] transition-all"
+                            style={{ width: `${updateProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {selected.meta.lastReadChapterTitle && (
                   <div className="mt-3 rounded-xl bg-[var(--panel-elevated)] p-3 text-sm text-[var(--muted)]">

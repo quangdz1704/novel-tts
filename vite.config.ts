@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: true,
+    host: '127.0.0.1',
+    strictPort: true,
+    proxy: {
+      '/api': 'http://127.0.0.1:8787',
+    },
   },
   resolve: {
     alias: {

@@ -1,4 +1,7 @@
-import { writeJsonFile, readJsonFile } from '../storage/fsAdapter';
+import {
+  writeJsonFile,
+  readJsonFile,
+} from '../storage/localLibraryStorage';
 
 const CACHE_KEY_PREFIX = 'translate_cache:';
 

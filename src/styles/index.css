@@ -159,6 +159,27 @@ button:disabled {
     @apply grid gap-4 border-b p-4 sm:grid-cols-2 lg:grid-cols-4;
   }
 
+  .reader-player {
+    border-color: var(--border);
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    @apply flex flex-col gap-3 border-b px-3 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between;
+  }
+
+  .reader-player-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .reader-player-toggle {
+    border-color: var(--border);
+    color: var(--muted);
+    background: var(--panel-elevated);
+    @apply flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium;
+  }
+
+  .reader-player-toggle input {
+    accent-color: var(--accent);
+  }
+
   .reader-content {
     @apply min-h-0 flex-1 overflow-auto px-4 py-6 sm:px-8 lg:px-12;
   }

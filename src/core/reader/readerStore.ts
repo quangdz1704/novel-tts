@@ -1,5 +1,8 @@
 import { create } from "zustand";
-import { getLibraryPath, readJsonFile } from "../storage/fsAdapter";
+import {
+  getLibraryPath,
+  readJsonFile,
+} from "../storage/localLibraryStorage";
 import {
   saveReadingProgress,
   getReadingProgress,

@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { findAdapter, getSourceInfo } from "../core/sources";
-import { ensureNovelDir, writeJsonFile } from "../core/storage/fsAdapter";
+import {
+  ensureNovelDir,
+  writeJsonFile,
+} from "../core/storage/localLibraryStorage";
 import {
   listNovelsMetadata,
   saveNovelMetadata,
@@ -8,6 +11,16 @@ import {
 import { useLibraryStore } from "../stores/libraryStore";
 import { DownloadQueue, type DownloadJob } from "../core/jobs/downloadQueue";
 import { toSafeId } from "../core/reader/content";
+import {
+  cancelBackendCrawl,
+  createBackendCrawl,
+  listBackendCrawlItems,
+  previewWithBackend,
+  resumeBackendCrawl,
+  subscribeToBackendCrawl,
+  type BackendCrawlJob,
+  type BackendCrawlItem,
+} from "../core/backend/client";
 import BookCover from "./BookCover";
 
 type Preview = {
@@ -19,6 +32,7 @@ type Preview = {
 const SAMPLE_URL = "https://wikicv.net/truyen/ngu-tien-mon-XyI88VS4CA5PobdX";
 
 export default function CrawlerPanel() {
+  const [crawlMode, setCrawlMode] = useState<"basic" | "advanced">("basic");
   const [url, setUrl] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [downloads, setDownloads] = useState<DownloadJob[]>([]);
@@ -26,9 +40,16 @@ export default function CrawlerPanel() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [maxChapters, setMaxChapters] = useState(0);
+  const [retryLimit, setRetryLimit] = useState(3);
+  const [retryBackoffMs, setRetryBackoffMs] = useState(2000);
+  const [skipFailed, setSkipFailed] = useState(false);
+  const [retryFailedAtEnd, setRetryFailedAtEnd] = useState(true);
   const [adapterUrl, setAdapterUrl] = useState("");
   const [history, setHistory] = useState<any[]>([]);
+  const [backendJob, setBackendJob] = useState<BackendCrawlJob | null>(null);
+  const [backendItems, setBackendItems] = useState<BackendCrawlItem[]>([]);
   const downloadRef = useRef<DownloadQueue | null>(null);
+  const backendUnsubscribeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const dq = new DownloadQueue(3);
@@ -54,6 +75,7 @@ export default function CrawlerPanel() {
         ),
       )
       .catch(() => {});
+    return () => backendUnsubscribeRef.current?.();
   }, []);
 
   const handlePreview = async () => {
@@ -63,6 +85,8 @@ export default function CrawlerPanel() {
     setPreview(null);
     setMessage("");
     setDownloads([]);
+    setBackendJob(null);
+    setBackendItems([]);
 
     if (!adapter) {
       setMessage(
@@ -73,6 +97,16 @@ export default function CrawlerPanel() {
 
     setLoadingPreview(true);
     try {
+      if (crawlMode === "advanced") {
+        const backendPreview = await previewWithBackend(targetUrl);
+        setPreview(backendPreview);
+        setAdapterUrl(targetUrl);
+        setMessage(
+          `Backend preview ready via ${backendPreview.transport}: ${backendPreview.meta.chapterCount || backendPreview.chapters.length} chapters detected.`,
+        );
+        return;
+      }
+
       const meta = await adapter.getNovel(targetUrl);
       const chapters = await adapter.getChapters(targetUrl, { maxChapters: 3 });
       const novelId = toSafeId(meta.title || targetUrl, `novel_${Date.now()}`);
@@ -110,8 +144,79 @@ export default function CrawlerPanel() {
     ]);
   };
 
+  const trackBackendJob = (job: BackendCrawlJob) => {
+    setBackendJob(job);
+    backendUnsubscribeRef.current?.();
+    backendUnsubscribeRef.current = subscribeToBackendCrawl(
+      job.id,
+      (nextJob) => {
+        setBackendJob(nextJob);
+        if (
+          [
+            "done",
+            "done_with_errors",
+            "paused",
+            "failed",
+            "cancelled",
+          ].includes(nextJob.state)
+        ) {
+          void listBackendCrawlItems(nextJob.id)
+            .then(setBackendItems)
+            .catch(() => {});
+        }
+        if (nextJob.state === "done") {
+          setMessage(
+            `Backend crawl completed: ${nextJob.completedCount} chapters saved.`,
+          );
+        } else if (nextJob.state === "done_with_errors") {
+          setMessage(
+            `Backend crawl completed with ${nextJob.failedCount} failed chapter(s). Resume to retry them.`,
+          );
+        } else if (nextJob.state === "paused") {
+          setMessage(
+            `Backend crawl paused after saving ${nextJob.completedCount} chapters: ${nextJob.error || "retryable error"}`,
+          );
+        } else if (nextJob.state === "failed") {
+          setMessage(
+            `Backend crawl failed: ${nextJob.error || "Unknown error"}`,
+          );
+        } else if (nextJob.state === "cancelled") {
+          setMessage("Backend crawl cancelled. Progress is still saved.");
+        } else {
+          setMessage(
+            `Backend crawl running: ${nextJob.completedCount} saved, ${nextJob.failedCount} failed.`,
+          );
+        }
+      },
+      () =>
+        setMessage(
+          "Lost backend progress stream. The job may still be running.",
+        ),
+    );
+  };
+
   const handleCrawl = async () => {
     if (!preview) return;
+    if (crawlMode === "advanced") {
+      setMessage("Creating backend crawl job...");
+      try {
+        const job = await createBackendCrawl(
+          adapterUrl || preview.meta.url,
+          {
+            maxChapters,
+            retryLimit,
+            retryBackoffMs,
+            skipFailed,
+            retryFailedAtEnd,
+          },
+        );
+        trackBackendJob(job);
+      } catch (error) {
+        setMessage(`Could not start backend crawl: ${String(error)}`);
+      }
+      return;
+    }
+
     const adapter = findAdapter(adapterUrl || preview.meta.url);
     if (!adapter) return;
     setMessage("Preparing chapter list...");
@@ -154,11 +259,43 @@ export default function CrawlerPanel() {
     );
   };
 
+  const handleResumeBackend = async () => {
+    if (!backendJob) return;
+    setMessage("Resuming backend crawl from persisted progress...");
+    try {
+      trackBackendJob(
+        await resumeBackendCrawl(backendJob.id, {
+          maxChapters,
+          retryLimit,
+          retryBackoffMs,
+          skipFailed,
+          retryFailedAtEnd,
+        }),
+      );
+    } catch (error) {
+      setMessage(`Could not resume backend crawl: ${String(error)}`);
+    }
+  };
+
   const doneCount = downloads.filter((d) => d.state === "done").length;
   const failedCount = downloads.filter((d) => d.state === "failed").length;
   const activeCount = downloads.filter((d) => d.state === "downloading").length;
   const progress =
     downloads.length > 0 ? Math.round((doneCount / downloads.length) * 100) : 0;
+  const backendTarget =
+    backendJob && backendJob.maxChapters > 0
+      ? backendJob.maxChapters
+      : Math.max(
+          backendJob?.discoveredCount || 0,
+          backendJob?.completedCount || 0,
+          1,
+        );
+  const backendProgress = backendJob
+    ? Math.min(
+        100,
+        Math.round((backendJob.completedCount / backendTarget) * 100),
+      )
+    : 0;
 
   const latestDownloads = useMemo(
     () => downloads.slice(-8).reverse(),
@@ -192,6 +329,32 @@ export default function CrawlerPanel() {
           >
             {loadingPreview ? "Scanning..." : "Preview"}
           </button>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-medium text-[var(--app-fg)]">
+              Crawl mode
+            </div>
+            <div className="text-xs text-[var(--muted)]">
+              Basic runs in this tab. Advanced uses Node, PostgreSQL and
+              Playwright fallback.
+            </div>
+          </div>
+          <div className="segmented-control">
+            <button
+              className={crawlMode === "basic" ? "active" : ""}
+              onClick={() => setCrawlMode("basic")}
+            >
+              Basic
+            </button>
+            <button
+              className={crawlMode === "advanced" ? "active" : ""}
+              onClick={() => setCrawlMode("advanced")}
+            >
+              Advanced
+            </button>
+          </div>
         </div>
 
         {message && <div className="mt-3 status-note">{message}</div>}
@@ -228,7 +391,9 @@ export default function CrawlerPanel() {
                   className="primary-button whitespace-nowrap"
                   onClick={handleCrawl}
                 >
-                  Confirm & crawl
+                  {crawlMode === "advanced"
+                    ? "Start backend crawl"
+                    : "Confirm & crawl"}
                 </button>
               </div>
 
@@ -249,6 +414,56 @@ export default function CrawlerPanel() {
                   </span>
                 </div>
               </div>
+
+              {crawlMode === "advanced" && (
+                <div className="mt-3 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 sm:grid-cols-2">
+                  <label className="text-sm text-[var(--app-fg)]">
+                    Retry count
+                    <input
+                      className="field-input mt-1"
+                      type="number"
+                      min={0}
+                      max={10}
+                      value={retryLimit}
+                      onChange={(e) => setRetryLimit(Number(e.target.value))}
+                    />
+                  </label>
+                  <label className="text-sm text-[var(--app-fg)]">
+                    Initial backoff (ms)
+                    <input
+                      className="field-input mt-1"
+                      type="number"
+                      min={250}
+                      max={60000}
+                      step={250}
+                      value={retryBackoffMs}
+                      onChange={(e) =>
+                        setRetryBackoffMs(Number(e.target.value))
+                      }
+                    />
+                  </label>
+                  <label className="flex items-start gap-2 text-sm text-[var(--app-fg)]">
+                    <input
+                      className="mt-1"
+                      type="checkbox"
+                      checked={skipFailed}
+                      onChange={(e) => setSkipFailed(e.target.checked)}
+                    />
+                    <span>
+                      Skip failed chapter when its next URL is already known.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm text-[var(--app-fg)]">
+                    <input
+                      className="mt-1"
+                      type="checkbox"
+                      checked={retryFailedAtEnd}
+                      onChange={(e) => setRetryFailedAtEnd(e.target.checked)}
+                    />
+                    <span>Retry skipped chapters after the main crawl.</span>
+                  </label>
+                </div>
+              )}
 
               <details className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
                 <summary className="cursor-pointer text-sm font-medium text-[var(--app-fg)]">
@@ -271,6 +486,83 @@ export default function CrawlerPanel() {
                 </div>
               </details>
             </div>
+          </div>
+        )}
+
+        {backendJob && (
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-[var(--app-fg)]">
+                  Backend job
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  {backendJob.completedCount} saved · {backendJob.failedCount}{" "}
+                  failed · {backendJob.state}
+                </div>
+              </div>
+              {["pending", "running"].includes(backendJob.state) && (
+                <button
+                  className="ghost-button"
+                  onClick={() => void cancelBackendCrawl(backendJob.id)}
+                >
+                  Cancel
+                </button>
+              )}
+              {[
+                "paused",
+                "failed",
+                "done_with_errors",
+                "cancelled",
+              ].includes(backendJob.state) && (
+                <button
+                  className="primary-button"
+                  onClick={() => void handleResumeBackend()}
+                >
+                  Resume
+                </button>
+              )}
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/25">
+              <div
+                className="h-full rounded-full bg-[var(--accent)] transition-all duration-300"
+                style={{ width: `${backendProgress}%` }}
+              />
+            </div>
+            {backendJob.currentUrl && (
+              <div className="mt-2 truncate text-xs text-[var(--muted)]">
+                {backendJob.currentUrl}
+              </div>
+            )}
+            {backendJob.error && (
+              <div className="mt-2 text-xs text-red-500">
+                {backendJob.error}
+              </div>
+            )}
+            {backendItems.some((item) => item.state === "failed") && (
+              <details className="mt-3 text-xs text-[var(--muted)]">
+                <summary className="cursor-pointer">
+                  Failed chapter details
+                </summary>
+                <div className="mt-2 grid gap-2">
+                  {backendItems
+                    .filter((item) => item.state === "failed")
+                    .map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-xl border border-[var(--border)] p-2"
+                      >
+                        <div>
+                          #{item.position} · attempts {item.attempts}
+                        </div>
+                        <div className="mt-1 break-all text-red-500">
+                          {item.error}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
 
