@@ -1,11 +1,17 @@
 {
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devPath": "http://127.0.0.1:5173",
+    "distDir": "../dist"
+  },
   "package": {
     "productName": "novel-tts",
     "version": "0.1.0"
   },
   "tauri": {
     "bundle": {
-      "active": false,
+      "active": true,
       "identifier": "com.noveltts.app",
       "icon": []
     }

@@ -4,6 +4,10 @@ version = "0.1.0"
 authors = ["novel-tts"]
 edition = "2021"
 
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "1.4", features = [] }
 serde = { version = "1.0", features = ["derive"] }
