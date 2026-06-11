@@ -1,20 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { findAdapter, getSourceInfo } from "../core/sources";
-import {
-  ensureNovelDir,
-  writeJsonFile,
-} from "../core/storage/localLibraryStorage";
-import {
-  listNovelsMetadata,
-  saveNovelMetadata,
-} from "../core/storage/indexeddb";
-import { useLibraryStore } from "../stores/libraryStore";
-import { DownloadQueue, type DownloadJob } from "../core/jobs/downloadQueue";
-import { toSafeId } from "../core/reader/content";
+import React, { useEffect, useRef, useState } from "react";
 import {
   cancelBackendCrawl,
   createBackendCrawl,
+  getBackendCrawlJob,
   listBackendCrawlItems,
+  listBackendCrawlJobs,
   previewWithBackend,
   resumeBackendCrawl,
   subscribeToBackendCrawl,
@@ -32,116 +22,53 @@ type Preview = {
 const SAMPLE_URL = "https://wikicv.net/truyen/ngu-tien-mon-XyI88VS4CA5PobdX";
 
 export default function CrawlerPanel() {
-  const [crawlMode, setCrawlMode] = useState<"basic" | "advanced">("basic");
   const [url, setUrl] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [downloads, setDownloads] = useState<DownloadJob[]>([]);
   const [message, setMessage] = useState("");
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [showLog, setShowLog] = useState(false);
   const [maxChapters, setMaxChapters] = useState(0);
   const [retryLimit, setRetryLimit] = useState(3);
   const [retryBackoffMs, setRetryBackoffMs] = useState(2000);
   const [skipFailed, setSkipFailed] = useState(false);
   const [retryFailedAtEnd, setRetryFailedAtEnd] = useState(true);
   const [adapterUrl, setAdapterUrl] = useState("");
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<BackendCrawlJob[]>([]);
   const [backendJob, setBackendJob] = useState<BackendCrawlJob | null>(null);
   const [backendItems, setBackendItems] = useState<BackendCrawlItem[]>([]);
-  const downloadRef = useRef<DownloadQueue | null>(null);
   const backendUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
-    const dq = new DownloadQueue(3);
-    dq.on("enqueue", (job: DownloadJob) => setDownloads((s) => [...s, job]));
-    dq.on("start", (job: DownloadJob) =>
-      setDownloads((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
-    );
-    dq.on("success", (job: DownloadJob) =>
-      setDownloads((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
-    );
-    dq.on("failed", (job: DownloadJob) =>
-      setDownloads((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
-    );
-    downloadRef.current = dq;
-    listNovelsMetadata()
-      .then((rows: any) =>
-        setHistory(
-          [...((rows as any[]) || [])].sort(
-            (a, b) =>
-              new Date(b.lastCrawledAt || 0).getTime() -
-              new Date(a.lastCrawledAt || 0).getTime(),
-          ),
-        ),
-      )
+  const loadHistory = () =>
+    listBackendCrawlJobs()
+      .then(setHistory)
       .catch(() => {});
+
+  useEffect(() => {
+    void loadHistory();
     return () => backendUnsubscribeRef.current?.();
   }, []);
 
   const handlePreview = async () => {
     const targetUrl = url.trim();
     if (!targetUrl) return;
-    const adapter = findAdapter(targetUrl);
     setPreview(null);
     setMessage("");
-    setDownloads([]);
     setBackendJob(null);
     setBackendItems([]);
-
-    if (!adapter) {
-      setMessage(
-        "Unsupported source. Current adapters: WikiCV, NovelBin, TruyenFull.",
-      );
-      return;
-    }
+    backendUnsubscribeRef.current?.();
 
     setLoadingPreview(true);
     try {
-      if (crawlMode === "advanced") {
-        const backendPreview = await previewWithBackend(targetUrl);
-        setPreview(backendPreview);
-        setAdapterUrl(targetUrl);
-        setMessage(
-          `Backend preview ready via ${backendPreview.transport}: ${backendPreview.meta.chapterCount || backendPreview.chapters.length} chapters detected.`,
-        );
-        return;
-      }
-
-      const meta = await adapter.getNovel(targetUrl);
-      const chapters = await adapter.getChapters(targetUrl, { maxChapters: 3 });
-      const novelId = toSafeId(meta.title || targetUrl, `novel_${Date.now()}`);
-      const enrichedMeta = {
-        ...meta,
-        ...getSourceInfo(targetUrl, adapter),
-        id: novelId,
-        url: targetUrl,
-        chapterCount: meta.chapterCount || chapters.length,
-        chapters,
-        lastCrawledAt: new Date().toISOString(),
-      };
-      setPreview({ novelId, meta: enrichedMeta, chapters });
+      const backendPreview = await previewWithBackend(targetUrl);
+      setPreview(backendPreview);
       setAdapterUrl(targetUrl);
       setMessage(
-        `Preview ready: ${meta.chapterCount || chapters.length} chapters detected, showing first ${chapters.length}.`,
+        `Backend preview ready via ${backendPreview.transport}: ${backendPreview.meta.chapterCount || backendPreview.chapters.length} chapters detected.`,
       );
     } catch (e) {
       setMessage(`Preview failed: ${String(e)}`);
     } finally {
       setLoadingPreview(false);
     }
-  };
-
-  const saveMetadata = async (data: Preview) => {
-    await saveNovelMetadata(data.novelId, data.meta);
-    try {
-      const dir = await ensureNovelDir(data.novelId);
-      await writeJsonFile(`${dir}/metadata.json`, data.meta);
-    } catch (e) {}
-    await useLibraryStore.getState().addNovel(data.meta);
-    setHistory((items) => [
-      data.meta,
-      ...items.filter((item) => item.id !== data.meta.id),
-    ]);
   };
 
   const trackBackendJob = (job: BackendCrawlJob) => {
@@ -151,6 +78,19 @@ export default function CrawlerPanel() {
       job.id,
       (nextJob) => {
         setBackendJob(nextJob);
+        setHistory((jobs) => {
+          const exists = jobs.some((item) => item.id === nextJob.id);
+          return exists
+            ? jobs.map((item) =>
+                item.id === nextJob.id
+                  ? {
+                      ...nextJob,
+                      novelTitle: nextJob.novelTitle || item.novelTitle,
+                    }
+                  : item,
+              )
+            : [nextJob, ...jobs];
+        });
         if (
           [
             "done",
@@ -168,10 +108,12 @@ export default function CrawlerPanel() {
           setMessage(
             `Backend crawl completed: ${nextJob.completedCount} chapters saved.`,
           );
+          void loadHistory();
         } else if (nextJob.state === "done_with_errors") {
           setMessage(
             `Backend crawl completed with ${nextJob.failedCount} failed chapter(s). Resume to retry them.`,
           );
+          void loadHistory();
         } else if (nextJob.state === "paused") {
           setMessage(
             `Backend crawl paused after saving ${nextJob.completedCount} chapters: ${nextJob.error || "retryable error"}`,
@@ -189,74 +131,65 @@ export default function CrawlerPanel() {
         }
       },
       () =>
-        setMessage(
-          "Lost backend progress stream. The job may still be running.",
-        ),
+        void getBackendCrawlJob(job.id)
+          .then((latestJob) => {
+            setBackendJob(latestJob);
+            setMessage(
+              "Progress stream closed. Loaded the latest persisted job state.",
+            );
+            void loadHistory();
+          })
+          .catch(() =>
+            setMessage(
+              "Lost backend progress stream. The job may still be running.",
+            ),
+          ),
     );
+  };
+
+  const selectHistoryJob = async (job: BackendCrawlJob) => {
+    backendUnsubscribeRef.current?.();
+    setMessage("Loading persisted crawl status...");
+    setBackendItems([]);
+    try {
+      const latestJob = await getBackendCrawlJob(job.id);
+      setBackendJob(latestJob);
+      setUrl(latestJob.sourceUrl);
+      setAdapterUrl(latestJob.sourceUrl);
+      setMaxChapters(latestJob.maxChapters);
+      setRetryLimit(latestJob.retryLimit);
+      setRetryBackoffMs(latestJob.retryBackoffMs);
+      setSkipFailed(latestJob.skipFailed);
+      setRetryFailedAtEnd(latestJob.retryFailedAtEnd);
+      const items = await listBackendCrawlItems(latestJob.id);
+      setBackendItems(items);
+      setMessage(
+        `Loaded crawl job: ${latestJob.completedCount} saved, ${latestJob.failedCount} failed (${latestJob.state}).`,
+      );
+      if (["pending", "running"].includes(latestJob.state)) {
+        trackBackendJob(latestJob);
+      }
+    } catch (error) {
+      setMessage(`Could not load crawl job: ${String(error)}`);
+    }
   };
 
   const handleCrawl = async () => {
     if (!preview) return;
-    if (crawlMode === "advanced") {
-      setMessage("Creating backend crawl job...");
-      try {
-        const job = await createBackendCrawl(
-          adapterUrl || preview.meta.url,
-          {
-            maxChapters,
-            retryLimit,
-            retryBackoffMs,
-            skipFailed,
-            retryFailedAtEnd,
-          },
-        );
-        trackBackendJob(job);
-      } catch (error) {
-        setMessage(`Could not start backend crawl: ${String(error)}`);
-      }
-      return;
-    }
-
-    const adapter = findAdapter(adapterUrl || preview.meta.url);
-    if (!adapter) return;
-    setMessage("Preparing chapter list...");
-    const chapters =
-      maxChapters > 0
-        ? await adapter.getChapters(adapterUrl || preview.meta.url, {
-            maxChapters,
-          })
-        : await adapter.getChapters(adapterUrl || preview.meta.url, {
-            maxChapters: 0,
-          });
-    const crawlData = {
-      ...preview,
-      chapters,
-      meta: {
-        ...preview.meta,
-        chapters,
-        chapterCount: chapters.length,
-        lastCrawledAt: new Date().toISOString(),
-      },
-    };
-    await saveMetadata(crawlData);
-    const selected =
-      maxChapters > 0 ? chapters.slice(0, maxChapters) : chapters;
-    setDownloads([]);
-    selected.forEach((ch, index) => {
-      downloadRef.current?.add({
-        id: ch.url,
-        novelId: crawlData.novelId,
-        chapterId: `ch_${String(index + 1).padStart(4, "0")}`,
-        title: ch.title,
-        url: ch.url,
-        attempts: 0,
-        state: "pending",
+    setMessage("Creating backend crawl job...");
+    try {
+      const job = await createBackendCrawl(adapterUrl || preview.meta.url, {
+        maxChapters,
+        retryLimit,
+        retryBackoffMs,
+        skipFailed,
+        retryFailedAtEnd,
       });
-    });
-    setPreview(crawlData);
-    setMessage(
-      `Crawling ${selected.length} chapters. You can keep reading while this runs.`,
-    );
+      void loadHistory();
+      trackBackendJob(job);
+    } catch (error) {
+      setMessage(`Could not start backend crawl: ${String(error)}`);
+    }
   };
 
   const handleResumeBackend = async () => {
@@ -277,11 +210,6 @@ export default function CrawlerPanel() {
     }
   };
 
-  const doneCount = downloads.filter((d) => d.state === "done").length;
-  const failedCount = downloads.filter((d) => d.state === "failed").length;
-  const activeCount = downloads.filter((d) => d.state === "downloading").length;
-  const progress =
-    downloads.length > 0 ? Math.round((doneCount / downloads.length) * 100) : 0;
   const backendTarget =
     backendJob && backendJob.maxChapters > 0
       ? backendJob.maxChapters
@@ -296,11 +224,6 @@ export default function CrawlerPanel() {
         Math.round((backendJob.completedCount / backendTarget) * 100),
       )
     : 0;
-
-  const latestDownloads = useMemo(
-    () => downloads.slice(-8).reverse(),
-    [downloads],
-  );
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -331,29 +254,12 @@ export default function CrawlerPanel() {
           </button>
         </div>
 
-        <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
           <div>
-            <div className="text-sm font-medium text-[var(--app-fg)]">
-              Crawl mode
-            </div>
+            <div className="text-sm font-medium text-[var(--app-fg)]">Backend crawl</div>
             <div className="text-xs text-[var(--muted)]">
-              Basic runs in this tab. Advanced uses Node, PostgreSQL and
-              Playwright fallback.
+              Node handles crawling and stores novels, chapters, jobs and progress in PostgreSQL.
             </div>
-          </div>
-          <div className="segmented-control">
-            <button
-              className={crawlMode === "basic" ? "active" : ""}
-              onClick={() => setCrawlMode("basic")}
-            >
-              Basic
-            </button>
-            <button
-              className={crawlMode === "advanced" ? "active" : ""}
-              onClick={() => setCrawlMode("advanced")}
-            >
-              Advanced
-            </button>
           </div>
         </div>
 
@@ -391,9 +297,7 @@ export default function CrawlerPanel() {
                   className="primary-button whitespace-nowrap"
                   onClick={handleCrawl}
                 >
-                  {crawlMode === "advanced"
-                    ? "Start backend crawl"
-                    : "Confirm & crawl"}
+                  Start backend crawl
                 </button>
               </div>
 
@@ -415,8 +319,7 @@ export default function CrawlerPanel() {
                 </div>
               </div>
 
-              {crawlMode === "advanced" && (
-                <div className="mt-3 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 sm:grid-cols-2">
+              <div className="mt-3 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 sm:grid-cols-2">
                   <label className="text-sm text-[var(--app-fg)]">
                     Retry count
                     <input
@@ -462,8 +365,7 @@ export default function CrawlerPanel() {
                     />
                     <span>Retry skipped chapters after the main crawl.</span>
                   </label>
-                </div>
-              )}
+              </div>
 
               <details className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
                 <summary className="cursor-pointer text-sm font-medium text-[var(--app-fg)]">
@@ -497,6 +399,7 @@ export default function CrawlerPanel() {
                   Backend job
                 </div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
+                  {backendJob.discoveredCount} discovered ·{" "}
                   {backendJob.completedCount} saved · {backendJob.failedCount}{" "}
                   failed · {backendJob.state}
                 </div>
@@ -512,6 +415,7 @@ export default function CrawlerPanel() {
               {[
                 "paused",
                 "failed",
+                "done",
                 "done_with_errors",
                 "cancelled",
               ].includes(backendJob.state) && (
@@ -534,10 +438,31 @@ export default function CrawlerPanel() {
                 {backendJob.currentUrl}
               </div>
             )}
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+              {backendJob.startedAt && (
+                <span>
+                  Started: {new Date(backendJob.startedAt).toLocaleString()}
+                </span>
+              )}
+              {backendJob.updatedAt && (
+                <span>
+                  Updated: {new Date(backendJob.updatedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
             {backendJob.error && (
-              <div className="mt-2 text-xs text-red-500">
-                {backendJob.error}
-              </div>
+              <>
+                <div className="mt-2 text-xs text-red-500">
+                  {backendJob.error}
+                </div>
+                {/HTTP (403|429|503)/.test(backendJob.error) && (
+                  <div className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-600">
+                    The source is rate-limiting or blocking requests. Wait for
+                    the server cooldown before resuming; repeated manual
+                    resumes can extend the block.
+                  </div>
+                )}
+              </>
             )}
             {backendItems.some((item) => item.state === "failed") && (
               <details className="mt-3 text-xs text-[var(--muted)]">
@@ -566,96 +491,60 @@ export default function CrawlerPanel() {
           </div>
         )}
 
-        {downloads.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3">
-            <div className="flex items-center justify-between gap-3 text-sm text-[var(--muted)]">
-              <span>
-                {doneCount}/{downloads.length} saved · active {activeCount} ·
-                failed {failedCount}
-              </span>
-              <button
-                className="ghost-button"
-                onClick={() => setShowLog((v) => !v)}
-              >
-                {showLog ? "Hide log" : "Show log"}
-              </button>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/25">
-              <div
-                className="h-full rounded-full bg-[var(--accent)] transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-
-            {showLog && (
-              <div className="mt-3 grid max-h-72 gap-2 overflow-auto pr-1 sm:grid-cols-2">
-                {latestDownloads.map((d) => (
-                  <div
-                    key={d.id}
-                    className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3"
-                  >
-                    <div className="truncate text-sm font-medium text-[var(--app-fg)]">
-                      {d.title || d.chapterId}
-                    </div>
-                    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
-                      <span>{d.chapterId}</span>
-                      <span
-                        className={
-                          d.state === "done"
-                            ? "badge badge-good"
-                            : d.state === "failed"
-                              ? "badge badge-bad"
-                              : "badge badge-warn"
-                        }
-                      >
-                        {d.state}
-                      </span>
-                    </div>
-                    {d.error && (
-                      <div className="mt-1 truncate text-xs text-red-600">
-                        {d.error}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </section>
 
       <aside className="surface-panel">
         <div className="flex items-end justify-between gap-3">
           <div>
             <p className="panel-kicker">History</p>
-            <h2 className="panel-title">Crawled novels</h2>
+            <h2 className="panel-title">Crawl jobs</h2>
           </div>
-          <span className="text-sm text-[var(--muted)]">{history.length}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[var(--muted)]">{history.length}</span>
+            <button className="ghost-button" onClick={() => void loadHistory()}>
+              Refresh
+            </button>
+          </div>
         </div>
         <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
           {history.length === 0 ? (
             <div className="empty-state">No crawl history yet.</div>
           ) : (
-            history.map((item) => (
+            history.map((job) => (
               <button
-                key={item.id}
-                className="w-full rounded-xl border border-[var(--border)] bg-[var(--panel-elevated)] p-3 text-left transition hover:border-[var(--accent)]"
-                onClick={() => {
-                  setUrl(item.url || "");
-                  setMessage(
-                    "Loaded from history. Preview again to update metadata.",
-                  );
-                }}
+                key={job.id}
+                className={`w-full rounded-xl border bg-[var(--panel-elevated)] p-3 text-left transition hover:border-[var(--accent)] ${
+                  backendJob?.id === job.id
+                    ? "border-[var(--accent)]"
+                    : "border-[var(--border)]"
+                }`}
+                onClick={() => void selectHistoryJob(job)}
               >
-                <div className="truncate text-sm font-semibold text-[var(--app-fg)]">
-                  {item.title || item.id}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 truncate text-sm font-semibold text-[var(--app-fg)]">
+                    {job.novelTitle || job.sourceUrl}
+                  </div>
+                  <span
+                    className={
+                      job.state === "done"
+                        ? "badge badge-good"
+                        : ["failed", "done_with_errors"].includes(job.state)
+                          ? "badge badge-bad"
+                          : "badge badge-warn"
+                    }
+                  >
+                    {job.state}
+                  </span>
                 </div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
-                  {item.chapterCount || item.chapters?.length || 0} chapters
+                  {job.completedCount} saved · {job.failedCount} failed
+                </div>
+                <div className="mt-1 truncate text-xs text-[var(--muted)]">
+                  {job.sourceUrl}
                 </div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
-                  {item.lastCrawledAt
-                    ? new Date(item.lastCrawledAt).toLocaleString()
+                  {job.updatedAt
+                    ? new Date(job.updatedAt).toLocaleString()
                     : "No timestamp"}
                 </div>
               </button>

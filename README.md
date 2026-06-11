@@ -6,12 +6,10 @@ Playwright.
 ## Current Capabilities
 
 - Browser reader, bookshelf, reading progress, TTS, glossary, and settings.
-- Basic crawl in the browser for supported sources that allow CORS.
-- Advanced WikiCV crawl through a persisted PostgreSQL job.
+- WikiCV crawl through a persisted PostgreSQL job.
 - Per-chapter retry state with pause/resume and failed-item tracking.
 - HTTP-first backend fetch with Playwright fallback.
-- Shared WikiCV parser used by both browser and backend transports.
-- Browser-local storage for Basic crawl and reader progress.
+- PostgreSQL-backed novels, chapters, crawl jobs, and reading progress.
 
 ## Quick Start
 
@@ -34,8 +32,8 @@ Open:
 http://127.0.0.1:5173
 ```
 
-Use `Basic` for a small browser-side crawl. Use `Advanced` for the Fastify
-backend, persisted jobs, PostgreSQL storage, and Playwright fallback.
+The frontend talks to Fastify for crawling, library data, chapter content, and
+reading progress.
 
 ## Common Commands
 
@@ -57,11 +55,11 @@ npm run build
 
 ## Support Status
 
-| Source | Basic browser crawl | Advanced backend crawl |
-| --- | --- | --- |
-| WikiCV | Yes | Yes |
-| NovelBin | Scaffold-level | Not implemented |
-| TruyenFull | Scaffold-level | Not implemented |
+| Source | Backend crawl |
+| --- | --- |
+| WikiCV | Yes |
+| NovelBin | Not implemented |
+| TruyenFull | Not implemented |
 
 Source markup can change. Keep crawl limits small until fixture tests confirm an
 adapter still matches the live site.

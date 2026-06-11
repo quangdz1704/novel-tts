@@ -12,6 +12,10 @@ export type IdParams = {
 };
 
 export type ResumeBody = Omit<CrawlBody, 'url'>;
+export type ReadingProgressBody = {
+  chapterId?: string;
+  position: Record<string, unknown>;
+};
 
 const crawlOptionProperties = {
   maxChapters: { type: 'integer', minimum: 0 },
@@ -43,5 +47,15 @@ export const idParamsSchema = {
   additionalProperties: false,
   properties: {
     id: { type: 'string', minLength: 1 },
+  },
+} as const;
+
+export const readingProgressBodySchema = {
+  type: 'object',
+  required: ['position'],
+  additionalProperties: false,
+  properties: {
+    chapterId: { type: 'string', minLength: 1 },
+    position: { type: 'object', additionalProperties: true },
   },
 } as const;

@@ -14,7 +14,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(cors, {
     origin: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
   });
 
   app.setErrorHandler((error: FastifyError, _request, reply) => {
@@ -29,4 +29,3 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   return app;
 }
-

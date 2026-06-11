@@ -28,5 +28,14 @@ export const config = {
   fetchTimeoutMs: numberFromEnv('CRAWL_TIMEOUT_MS', 20_000),
   maxResponseBytes: numberFromEnv('CRAWL_MAX_RESPONSE_BYTES', 5_000_000),
   maxChapters: numberFromEnv('CRAWL_MAX_CHAPTERS', 3_000),
-  minDelayMs: numberFromEnv('CRAWL_MIN_DELAY_MS', 300),
+  minDelayMs: numberFromEnv('CRAWL_MIN_DELAY_MS', 1_500),
+  delayJitterMs: numberFromEnv('CRAWL_DELAY_JITTER_MS', 1_500),
+  rateLimitCooldownMs: numberFromEnv(
+    'CRAWL_RATE_LIMIT_COOLDOWN_MS',
+    60_000,
+  ),
+  forbiddenCooldownMs: numberFromEnv(
+    'CRAWL_FORBIDDEN_COOLDOWN_MS',
+    5 * 60_000,
+  ),
 };

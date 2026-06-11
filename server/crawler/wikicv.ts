@@ -5,7 +5,7 @@ import {
 } from '../../src/core/sources/parsers/wikicv';
 import { parseCheerioHtml } from './cheerioHtml';
 import { config } from '../config';
-import { fetchHtml } from './fetcher';
+import { fetchHtml, getFetchRetryDelay } from './fetcher';
 import {
   finishJob,
   getLastDoneJobItem,
@@ -69,7 +69,13 @@ async function processChapter(
     } catch (error) {
       lastError = error;
       if (attempt < job.retry_limit) {
-        await delay(job.retry_backoff_ms * 2 ** attempt);
+        const exponentialDelay = job.retry_backoff_ms * 2 ** attempt;
+        await delay(
+          getFetchRetryDelay(
+            error,
+            exponentialDelay + Math.floor(Math.random() * job.retry_backoff_ms),
+          ),
+        );
       }
     }
   }
@@ -118,7 +124,6 @@ export async function previewWikiCv(url: string, maxChapters = 3) {
     );
     chapters.push({ id: chapter.id, title: chapter.title, url: chapter.url });
     currentUrl = chapter.nextUrl;
-    if (currentUrl) await delay(config.minDelayMs);
   }
 
   return {
@@ -204,7 +209,6 @@ export async function crawlWikiCv(job: CrawlJobRow) {
       currentUrl = result.nextUrl;
       position += 1;
       await syncJobCounts(job.id, novelId, currentUrl);
-      if (currentUrl) await delay(config.minDelayMs);
     }
 
     if (job.retry_failed_at_end) {

@@ -37,6 +37,13 @@ export async function migrate() {
     CREATE INDEX IF NOT EXISTS chapters_novel_position_idx
       ON chapters (novel_id, position);
 
+    CREATE TABLE IF NOT EXISTS reading_progress (
+      novel_id BIGINT PRIMARY KEY REFERENCES novels(id) ON DELETE CASCADE,
+      chapter_id BIGINT REFERENCES chapters(id) ON DELETE SET NULL,
+      position JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS crawl_jobs (
       id UUID PRIMARY KEY,
       source_url TEXT NOT NULL,

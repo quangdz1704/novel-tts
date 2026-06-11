@@ -43,7 +43,7 @@ describe('Fastify API', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({
-      error: 'Advanced crawl currently supports WikiCV',
+      error: 'Backend crawl currently supports WikiCV',
     });
   });
 
@@ -59,5 +59,18 @@ describe('Fastify API', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toContain('must be <= 10');
+  });
+
+  it('validates reading progress before touching the database', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/novels/1/progress',
+      payload: { chapterId: '2' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain(
+      "must have required property 'position'",
+    );
   });
 });

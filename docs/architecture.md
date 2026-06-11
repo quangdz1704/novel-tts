@@ -4,26 +4,14 @@
 
 Du an theo huong web-first:
 
-- React/Vite phu trach UI va Basic crawl.
+- React/Vite phu trach UI.
 - Fastify phu trach API.
-- PostgreSQL luu Advanced crawl jobs, novel va chapters.
+- PostgreSQL luu crawl jobs, novel, chapters va reading progress.
 - Worker backend xu ly crawl dai, retry/cancel va Playwright fallback.
 
 ## Luong du lieu
 
-### Basic crawl
-
-```text
-React
-  -> browser fetch
-  -> browser HtmlDocument
-  -> shared source parser
-  -> IndexedDB/localStorage
-```
-
-Basic phu hop preview va crawl nho. No bi gioi han boi CORS va vong doi cua tab.
-
-### Advanced crawl
+### Backend crawl
 
 ```text
 React
@@ -38,7 +26,8 @@ React
   -> SSE progress
 ```
 
-Advanced tiep tuc chay khi tab dong, co persisted state va khong bi browser CORS.
+Backend crawl tiep tuc chay khi tab dong, co persisted state va khong bi browser
+CORS.
 
 ## Folder Ownership
 
@@ -56,10 +45,8 @@ src/
   pages/                 page composition
   stores/                Zustand UI state
   core/backend/          typed frontend API client
-  core/sources/          browser source adapters
+  core/sources/          source adapters and shared types
   core/sources/parsers/  parser code shared by frontend/backend
-  core/jobs/             Basic browser download queue
-  core/storage/          browser-local storage
   core/reader/           reader state and content normalization
   core/tts/              browser TTS
   core/translate/        translation provider abstractions
@@ -76,11 +63,10 @@ src/
 
 ## WikiCV
 
-WikiCV uses one parser for both paths:
+WikiCV uses a transport-independent parser:
 
 ```text
-Basic:    fetch -> DOMParser wrapper -> WikiCV parser
-Advanced: HTTP/Playwright -> Cheerio wrapper -> WikiCV parser
+HTTP/Playwright -> Cheerio wrapper -> WikiCV parser
 ```
 
 The backend processes a chapter and discovers `Chuong sau` from the same HTML,
@@ -94,6 +80,7 @@ Main tables:
 - `chapters`
 - `crawl_jobs`
 - `crawl_job_items`
+- `reading_progress`
 
 The current worker claims jobs with `FOR UPDATE SKIP LOCKED`. One worker loop is
 started in the API process. Split it into a separate process only when deployment
@@ -108,9 +95,7 @@ state.
 
 - `ReaderPanel`, `CrawlerPanel`, and `LibraryPanel` are large UI components.
   Split them by view responsibility when their behavior next changes.
-- Advanced backend support currently exists only for WikiCV.
-- Basic and Advanced libraries are not yet presented as one unified data source.
-- Basic data is browser-local while Advanced data is stored in PostgreSQL.
+- Backend crawl support currently exists only for WikiCV.
 - SQL migration is idempotent schema setup, not a versioned migration system.
 - Multi-worker coordination needs broader integration tests before production
   deployment.

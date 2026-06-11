@@ -5,6 +5,86 @@ import { chromium, type Browser } from 'playwright';
 import { config } from '../config';
 
 let browser: Browser | undefined;
+const nextRequestAtByHost = new Map<string, number>();
+const hostQueues = new Map<string, Promise<void>>();
+
+export class CrawlFetchError extends Error {
+  status?: number;
+  retryAfterMs?: number;
+
+  constructor(
+    message: string,
+    options: { status?: number; retryAfterMs?: number; cause?: unknown } = {},
+  ) {
+    super(message, { cause: options.cause });
+    this.name = 'CrawlFetchError';
+    this.status = options.status;
+    this.retryAfterMs = options.retryAfterMs;
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomJitter(maxMs: number) {
+  return maxMs > 0 ? Math.floor(Math.random() * (maxMs + 1)) : 0;
+}
+
+function parseRetryAfter(value: string | null) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
+function cooldownForStatus(status: number, retryAfter?: string | null) {
+  const headerDelay = parseRetryAfter(retryAfter || null);
+  if (headerDelay != null) return headerDelay;
+  if (status === 403) return config.forbiddenCooldownMs;
+  if (status === 429 || status === 503) return config.rateLimitCooldownMs;
+  return undefined;
+}
+
+async function waitForHostSlot(rawUrl: string) {
+  const host = new URL(rawUrl).hostname.toLowerCase();
+  const previous = hostQueues.get(host) || Promise.resolve();
+  const current = previous
+    .catch(() => {})
+    .then(async () => {
+      const waitMs = Math.max(
+        0,
+        (nextRequestAtByHost.get(host) || 0) - Date.now(),
+      );
+      if (waitMs > 0) await delay(waitMs);
+      nextRequestAtByHost.set(
+        host,
+        Date.now() + config.minDelayMs + randomJitter(config.delayJitterMs),
+      );
+    });
+  hostQueues.set(host, current);
+  try {
+    await current;
+  } finally {
+    if (hostQueues.get(host) === current) hostQueues.delete(host);
+  }
+}
+
+function applyHostCooldown(rawUrl: string, cooldownMs: number) {
+  const host = new URL(rawUrl).hostname.toLowerCase();
+  nextRequestAtByHost.set(
+    host,
+    Math.max(nextRequestAtByHost.get(host) || 0, Date.now() + cooldownMs),
+  );
+}
+
+export function getFetchRetryDelay(error: unknown, fallbackMs: number) {
+  if (error instanceof CrawlFetchError && error.retryAfterMs != null) {
+    return Math.max(fallbackMs, error.retryAfterMs);
+  }
+  return fallbackMs;
+}
 
 async function ensureBrowser() {
   if (browser) return browser;
@@ -71,6 +151,7 @@ async function fetchHttpHtml(rawUrl: string) {
   let current = await validateUrl(rawUrl);
 
   for (let redirect = 0; redirect <= 5; redirect += 1) {
+    await waitForHostSlot(current.href);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.fetchTimeoutMs);
     try {
@@ -89,7 +170,17 @@ async function fetchHttpHtml(rawUrl: string) {
         current = await validateUrl(new URL(location, current).href);
         continue;
       }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        const cooldownMs = cooldownForStatus(
+          response.status,
+          response.headers.get('retry-after'),
+        );
+        if (cooldownMs != null) applyHostCooldown(current.href, cooldownMs);
+        throw new CrawlFetchError(`HTTP ${response.status}`, {
+          status: response.status,
+          retryAfterMs: cooldownMs,
+        });
+      }
 
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('text/html')) {
@@ -116,6 +207,7 @@ async function fetchHttpHtml(rawUrl: string) {
 
 async function fetchPlaywrightHtml(rawUrl: string) {
   const url = await validateUrl(rawUrl);
+  await waitForHostSlot(url.href);
   const activeBrowser = await ensureBrowser();
   const context = await activeBrowser.newContext();
   const page = await context.newPage();
@@ -143,6 +235,13 @@ export async function fetchHtml(
     httpError = error;
   }
 
+  if (
+    httpError instanceof CrawlFetchError &&
+    [403, 429, 503].includes(httpError.status || 0)
+  ) {
+    throw httpError;
+  }
+
   try {
     const html = await fetchPlaywrightHtml(url);
     if (!isExpectedHtml(html)) {
@@ -150,8 +249,9 @@ export async function fetchHtml(
     }
     return { html, transport: 'playwright' as const };
   } catch (browserError) {
-    throw new Error(
+    throw new CrawlFetchError(
       `HTTP fetch failed (${String(httpError)}); Playwright failed (${String(browserError)})`,
+      { cause: browserError },
     );
   }
 }

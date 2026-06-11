@@ -1,14 +1,9 @@
 import { create } from "zustand";
 import {
-  getLibraryPath,
-  readJsonFile,
-} from "../storage/localLibraryStorage";
-import {
-  saveReadingProgress,
-  getReadingProgress,
-  getNovelMetadata,
-  saveNovelMetadata,
-} from "../storage/indexeddb";
+  getBackendChapter,
+  getBackendReadingProgress,
+  saveBackendReadingProgress,
+} from "../backend/client";
 
 type ReaderState = {
   novelId?: string;
@@ -37,20 +32,17 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
   async loadChapter(novelId: string, chapterId: string) {
     set({ novelId, chapterId, content: undefined });
     try {
-      const base = await getLibraryPath();
-      const path = `${base}/${novelId}/chapters/${chapterId}.json`;
-      const data: any = await readJsonFile(path);
-      if (data && data.content) {
-        set({ content: data.content });
-        try {
-          const meta: any = await getNovelMetadata(novelId);
-          await saveNovelMetadata(novelId, {
-            ...(meta || { id: novelId }),
-            lastReadAt: new Date().toISOString(),
-            lastReadChapterId: chapterId,
-            lastReadChapterTitle: data.title,
-          });
-        } catch (e) {}
+      const chapter = await getBackendChapter(chapterId);
+      if (chapter.content) {
+        set({ content: chapter.content });
+        const previous = await getBackendReadingProgress(novelId);
+        await saveBackendReadingProgress(novelId, {
+          chapterId,
+          position:
+            previous?.chapterId === chapterId
+              ? previous.position
+              : { scrollY: 0 },
+        });
         return true;
       }
     } catch (e) {
@@ -66,9 +58,8 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
     const { novelId } = get();
     if (!novelId) return;
     try {
-      await saveReadingProgress(novelId, {
+      await saveBackendReadingProgress(novelId, {
         chapterId: get().chapterId,
-        updatedAt: new Date().toISOString(),
         position: pos,
       });
     } catch (e) {
@@ -77,7 +68,7 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
   },
   async restoreProgress(novelId: string) {
     try {
-      const p: any = await getReadingProgress(novelId);
+      const p = await getBackendReadingProgress(novelId);
       return p?.position || null;
     } catch (e) {
       return null;

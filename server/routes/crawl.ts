@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   createOrResumeCrawlJob,
   getCrawlJob,
+  listCrawlJobs,
   listJobItems,
   requestCancel,
   resumeJob,
@@ -30,13 +31,17 @@ function assertWikiCvUrl(rawUrl: string) {
     !url.hostname.endsWith('.wikicv.net')
   ) {
     throw Object.assign(
-      new Error('Advanced crawl currently supports WikiCV'),
+      new Error('Backend crawl currently supports WikiCV'),
       { statusCode: 400 },
     );
   }
 }
 
 export async function registerCrawlRoutes(app: FastifyInstance) {
+  app.get('/api/crawl/jobs', async () =>
+    (await listCrawlJobs()).map(serializeJob),
+  );
+
   app.post<{ Body: CrawlBody }>(
     '/api/crawl/preview',
     { schema: { body: crawlBodySchema } },

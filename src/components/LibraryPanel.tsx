@@ -1,20 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ensureNovelDir,
-  listChapters,
-  listNovels,
-  writeJsonFile,
-} from "../core/storage/localLibraryStorage";
-import {
-  listNovelsMetadata,
-  listReadingProgress,
-  saveNovelMetadata,
-} from "../core/storage/indexeddb";
 import NovelCard from "./NovelCard";
 import { useReaderStore } from "../core/reader/readerStore";
 import BookCover from "./BookCover";
-import { DownloadQueue, type DownloadJob } from "../core/jobs/downloadQueue";
-import { findAdapter, getSourceInfo } from "../core/sources";
+import {
+  createBackendCrawl,
+  listBackendNovelChapters,
+  listBackendNovels,
+  subscribeToBackendCrawl,
+} from "../core/backend/client";
 
 type SortMode = "recentRead" | "recentCrawl" | "title";
 
@@ -33,9 +26,8 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
   const [sort, setSort] = useState<SortMode>("recentRead");
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [updateJobs, setUpdateJobs] = useState<DownloadJob[]>([]);
   const [updateMessage, setUpdateMessage] = useState("");
-  const downloadRef = useRef<DownloadQueue | null>(null);
+  const updateUnsubscribeRef = useRef<(() => void) | null>(null);
   const openChapter = useReaderStore((s) => s.openChapter);
 
   const loadLibrary = useCallback(() => {
@@ -43,49 +35,33 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
     (async () => {
       try {
         setLoading(true);
-        const [files, dbMeta, progressRows] = await Promise.all([
-          listNovels(),
-          listNovelsMetadata(),
-          listReadingProgress(),
-        ]);
+        const backendNovels = await listBackendNovels();
         if (!mounted) return;
-        const metaById: Record<string, any> = {};
-        ((dbMeta as any[]) || []).forEach((m) => (metaById[m.id] = m));
-        const progressById: Record<string, any> = {};
-        ((progressRows as any[]) || []).forEach((p) => {
-          progressById[p.novelId] = p;
-        });
-
-        const ids = files.filter((name: string | undefined): name is string =>
-          Boolean(name),
-        );
         const items = await Promise.all(
-          ids.map(async (id: string) => {
-            const storedChapters = await listChapters(id);
-            const metaChapters = (metaById[id]?.chapters || []).map(
-              (ch: any, index: number) => ({
-                id: `ch_${String(index + 1).padStart(4, "0")}`,
-                title: ch.title,
-                url: ch.url,
-              }),
-            );
-            const chapters =
-              metaChapters.length > 0
-                ? metaChapters
-                : storedChapters.map((chapterId: string) => ({
-                    id: chapterId,
-                    title: chapterId,
-                  }));
+          backendNovels.map(async (novel) => {
+            const backendChapters = await listBackendNovelChapters(novel.id);
+            const chapters = backendChapters.map((chapter) => ({
+              id: chapter.id,
+              title: chapter.title,
+              url: chapter.sourceUrl,
+            }));
             return {
-              id,
-              firstChapter:
-                progressById[id]?.chapterId ||
-                chapters[0]?.id ||
-                storedChapters[0],
-              chapterCount: chapters.length || storedChapters.length,
+              id: novel.id,
+              firstChapter: novel.lastReadChapterId || chapters[0]?.id,
+              chapterCount: chapters.length,
               chapters,
-              meta: metaById[id] || { id },
-              progress: progressById[id],
+              meta: {
+                ...novel,
+                url: novel.sourceUrl,
+                chapters,
+              },
+              progress: novel.lastReadAt
+                ? {
+                    chapterId: novel.lastReadChapterId,
+                    position: novel.readingPosition,
+                    updatedAt: novel.lastReadAt,
+                  }
+                : undefined,
             };
           }),
         );
@@ -106,18 +82,7 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
   useEffect(() => loadLibrary(), [loadLibrary]);
 
   useEffect(() => {
-    const dq = new DownloadQueue(3);
-    dq.on("enqueue", (job: DownloadJob) => setUpdateJobs((s) => [...s, job]));
-    dq.on("start", (job: DownloadJob) =>
-      setUpdateJobs((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
-    );
-    dq.on("success", (job: DownloadJob) =>
-      setUpdateJobs((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
-    );
-    dq.on("failed", (job: DownloadJob) =>
-      setUpdateJobs((s) => s.map((d) => (d.id === job.id ? { ...job } : d))),
-    );
-    downloadRef.current = dq;
+    return () => updateUnsubscribeRef.current?.();
   }, []);
 
   const sorted = useMemo(() => {
@@ -140,101 +105,56 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
 
   const selected = sorted.find((item) => item.id === selectedId) || sorted[0];
 
-  const open = (novelId: string, chapterId?: string) => {
+  const open = async (novelId: string, chapterId?: string) => {
     if (!chapterId) return;
-    openChapter(novelId, chapterId);
+    await openChapter(novelId, chapterId);
     onRead?.();
   };
 
   const updateSelected = async () => {
     if (!selected || updatingId) return;
     const sourceUrl = selected.meta.sourceUrl || selected.meta.url;
-    const adapter = sourceUrl ? findAdapter(sourceUrl) : undefined;
-    if (!sourceUrl || !adapter) {
-      setUpdateMessage("This novel has no supported source URL to update.");
+    if (!sourceUrl) {
+      setUpdateMessage("This novel has no source URL to update.");
       return;
     }
 
     setUpdatingId(selected.id);
-    setUpdateJobs([]);
-    setUpdateMessage("Checking latest chapter list...");
+    setUpdateMessage("Starting backend update...");
     try {
-      const [freshMeta, sourceChapters, storedChapters] = await Promise.all([
-        adapter.getNovel(sourceUrl),
-        adapter.getChapters(sourceUrl, { maxChapters: 0 }),
-        listChapters(selected.id),
-      ]);
-      const chapters = sourceChapters.map((chapter, index) => ({
-        ...chapter,
-        id: `ch_${String(index + 1).padStart(4, "0")}`,
-      }));
-      const stored = new Set(storedChapters);
-      const missing = chapters.filter((chapter) => !stored.has(chapter.id));
-      const nextMeta = {
-        ...selected.meta,
-        ...freshMeta,
-        ...getSourceInfo(sourceUrl, adapter),
-        id: selected.id,
-        url: sourceUrl,
-        sourceUrl,
-        chapters,
-        chapterCount: chapters.length,
-        lastCrawledAt: new Date().toISOString(),
-      };
-
-      await saveNovelMetadata(selected.id, nextMeta);
-      try {
-        const dir = await ensureNovelDir(selected.id);
-        await writeJsonFile(`${dir}/metadata.json`, nextMeta);
-      } catch (e) {}
-
-      setNovels((items) =>
-        items.map((item) =>
-          item.id === selected.id
-            ? {
-                ...item,
-                meta: nextMeta,
-                chapters,
-                chapterCount: chapters.length,
-                firstChapter:
-                  item.progress?.chapterId || chapters[0]?.id || item.firstChapter,
-              }
-            : item,
-        ),
-      );
-
-      if (missing.length === 0) {
-        setUpdateMessage("Library is already up to date.");
-        return;
-      }
-
-      missing.forEach((chapter) => {
-        downloadRef.current?.add({
-          id: chapter.url,
-          novelId: selected.id,
-          chapterId: chapter.id,
-          title: chapter.title,
-          url: chapter.url,
-          attempts: 0,
-          state: "pending",
-        });
+      const job = await createBackendCrawl(sourceUrl, {
+        maxChapters: 0,
+        retryLimit: 3,
+        retryBackoffMs: 2_000,
+        skipFailed: false,
+        retryFailedAtEnd: true,
       });
-      setUpdateMessage(`Found ${missing.length} new chapters. Download started.`);
+      updateUnsubscribeRef.current?.();
+      updateUnsubscribeRef.current = subscribeToBackendCrawl(
+        job.id,
+        (nextJob) => {
+          setUpdateMessage(
+            `Backend update: ${nextJob.completedCount} saved, ${nextJob.failedCount} failed (${nextJob.state}).`,
+          );
+          if (
+            ["done", "done_with_errors", "paused", "failed", "cancelled"].includes(
+              nextJob.state,
+            )
+          ) {
+            setUpdatingId(null);
+            void loadLibrary();
+          }
+        },
+        () => {
+          setUpdatingId(null);
+          setUpdateMessage("Lost backend update stream. The job may still be running.");
+        },
+      );
     } catch (e) {
       setUpdateMessage(`Update failed: ${String(e)}`);
-    } finally {
       setUpdatingId(null);
     }
   };
-
-  const updateDoneCount = updateJobs.filter((job) => job.state === "done").length;
-  const updateFailedCount = updateJobs.filter(
-    (job) => job.state === "failed",
-  ).length;
-  const updateProgress =
-    updateJobs.length > 0
-      ? Math.round((updateDoneCount / updateJobs.length) * 100)
-      : 0;
 
   return (
     <div className="library-shell">
@@ -327,22 +247,6 @@ export default function LibraryPanel({ onRead }: { onRead?: () => void }) {
                 {updateMessage && (
                   <div className="mt-3 rounded-xl bg-[var(--panel-elevated)] p-3 text-sm text-[var(--muted)]">
                     {updateMessage}
-                    {updateJobs.length > 0 && (
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span>
-                            {updateDoneCount}/{updateJobs.length} saved
-                          </span>
-                          <span>{updateFailedCount} failed</span>
-                        </div>
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/20">
-                          <div
-                            className="h-full rounded-full bg-[var(--accent)] transition-all"
-                            style={{ width: `${updateProgress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 

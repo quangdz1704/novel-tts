@@ -3,7 +3,10 @@ import { useReaderStore } from "../core/reader/readerStore";
 import { htmlToReadableBlocks, sanitizeHtml } from "../core/reader/content";
 import { browserTTS } from "../core/tts/browserTTS";
 import { useSettingsStore } from "../stores/settingsStore";
-import { getNovelMetadata } from "../core/storage/indexeddb";
+import {
+  getBackendNovel,
+  listBackendNovelChapters,
+} from "../core/backend/client";
 import BookCover from "./BookCover";
 import { glossaryManager } from "../core/glossary/manager";
 
@@ -101,23 +104,21 @@ export default function ReaderPanel({
     let cancelled = false;
     (async () => {
       try {
-        const meta: any = await getNovelMetadata(novelId);
-        setMeta(meta);
-
-        const chapters = meta?.chapters || [];
-        const index = chapters.findIndex(
-          (_ch: any, idx: number) =>
-            `ch_${String(idx + 1).padStart(4, "0")}` === chapterId,
-        );
+        const [novel, chapters] = await Promise.all([
+          getBackendNovel(novelId),
+          listBackendNovelChapters(novelId),
+        ]);
+        setMeta(novel);
+        const index = chapters.findIndex((chapter) => chapter.id === chapterId);
         const currentChapter = index >= 0 ? chapters[index] : null;
         setCurrentChapter(currentChapter);
 
-        const prev = index > 1 ? chapters[index - 1] : null;
+        const prev = index > 0 ? chapters[index - 1] : null;
         if (!cancelled) {
           setPrevChapter(
             prev
               ? {
-                  id: `ch_${String(index).padStart(4, "0")}`,
+                  id: prev.id,
                   title: prev.title,
                 }
               : null,
@@ -128,7 +129,7 @@ export default function ReaderPanel({
           setNextChapter(
             next
               ? {
-                  id: `ch_${String(index + 2).padStart(4, "0")}`,
+                  id: next.id,
                   title: next.title,
                 }
               : null,

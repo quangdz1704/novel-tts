@@ -48,8 +48,8 @@ npm run dev:all
 npm run dev
 ```
 
-Use this for UI, reader, and Basic crawl work. Advanced crawl requires the API
-and PostgreSQL.
+Use this for isolated UI work. Library, reader data, and crawling require the
+API and PostgreSQL.
 
 ### API Only
 
@@ -73,10 +73,9 @@ npm run build
 1. Start PostgreSQL and `npm run dev:all`.
 2. Open Admin -> Crawl.
 3. Use the WikiCV sample URL.
-4. Select `Basic`, preview, and crawl one to three chapters.
-5. Select `Advanced`, preview, and start a job with limit `3`.
-6. Confirm SSE progress reaches `done`.
-7. Query `GET /api/novels` and the novel chapter endpoint.
+4. Preview and start a job with limit `3`.
+5. Confirm SSE progress reaches `done`.
+6. Query `GET /api/novels` and the novel chapter endpoint.
 
 Avoid chapter limit `0` during development. It means crawl until no next
 chapter is found or the server safety limit is reached.
@@ -129,7 +128,7 @@ src/core/sources/parsers/
 Parser functions receive an `HtmlDocument`; they must not call `fetch`, access
 PostgreSQL, or depend directly on browser globals.
 
-### Basic Browser Adapter
+### Source Adapter
 
 Add the browser adapter under:
 
@@ -137,7 +136,7 @@ Add the browser adapter under:
 src/core/sources/<source>.ts
 ```
 
-It may use browser `fetch`, then pass HTML to the shared parser.
+Keep source parsing transport-independent so the backend runner can reuse it.
 
 ### Advanced Backend Runner
 
@@ -163,6 +162,13 @@ tests because markup and network behavior are unstable.
 - Backend URLs are restricted by `CRAWL_ALLOWED_HOSTS`.
 - URL resolution rejects private and loopback IP addresses.
 - HTTP fetch is attempted before Playwright.
+- Requests to the same host are paced by `CRAWL_MIN_DELAY_MS` plus random
+  `CRAWL_DELAY_JITTER_MS`.
+- `429` and `503` responses honor `Retry-After` or
+  `CRAWL_RATE_LIMIT_COOLDOWN_MS`. A `403` uses the longer
+  `CRAWL_FORBIDDEN_COOLDOWN_MS`.
+- Playwright fallback is skipped for `403`, `429`, and `503` so a blocked HTTP
+  request is not immediately followed by another browser request.
 - Crawl concurrency is intentionally one worker at present.
-- PostgreSQL stores Advanced jobs and chapter content.
-- Browser local storage/IndexedDB remains the Basic-mode library.
+- PostgreSQL stores jobs, library metadata, chapter content, and reading
+  progress.

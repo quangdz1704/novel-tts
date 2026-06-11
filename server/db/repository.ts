@@ -22,6 +22,7 @@ export type CrawlJobRow = {
   started_at?: string;
   finished_at?: string;
   updated_at: string;
+  novel_title?: string;
 };
 
 export type CrawlJobItemRow = {
@@ -50,6 +51,7 @@ export function serializeJob(job: CrawlJobRow) {
     failedCount: job.failed_count,
     currentUrl: job.current_url,
     novelId: job.novel_id,
+    novelTitle: job.novel_title,
     retryLimit: job.retry_limit,
     retryBackoffMs: job.retry_backoff_ms,
     skipFailed: job.skip_failed,
@@ -178,6 +180,18 @@ export async function getCrawlJob(id: string) {
     [id],
   );
   return result.rows[0];
+}
+
+export async function listCrawlJobs(limit = 50) {
+  const result = await pool.query<CrawlJobRow>(
+    `SELECT j.*, n.title AS novel_title
+     FROM crawl_jobs j
+     LEFT JOIN novels n ON n.id = j.novel_id
+     ORDER BY j.updated_at DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return result.rows;
 }
 
 export async function claimCrawlJob() {
@@ -486,9 +500,15 @@ export async function getJobItemCounts(jobId: string) {
 
 export async function listNovels() {
   const result = await pool.query(
-    `SELECT id, source_key, source_url, title, author, summary, cover_url,
-            status, chapter_count, latest_chapter, last_crawled_at
-     FROM novels ORDER BY updated_at DESC`,
+    `SELECT n.id, n.source_key, n.source_url, n.title, n.author, n.summary,
+            n.cover_url, n.status, n.chapter_count, n.latest_chapter,
+            n.last_crawled_at, p.chapter_id AS last_read_chapter_id,
+            c.title AS last_read_chapter_title,
+            p.position AS reading_position, p.updated_at AS last_read_at
+     FROM novels n
+     LEFT JOIN reading_progress p ON p.novel_id = n.id
+     LEFT JOIN chapters c ON c.id = p.chapter_id
+     ORDER BY COALESCE(p.updated_at, n.updated_at) DESC`,
   );
   return result.rows;
 }
@@ -509,5 +529,31 @@ export async function listChapters(novelId: string) {
 
 export async function getChapter(id: string) {
   const result = await pool.query('SELECT * FROM chapters WHERE id = $1', [id]);
+  return result.rows[0];
+}
+
+export async function getReadingProgress(novelId: string) {
+  const result = await pool.query(
+    `SELECT novel_id, chapter_id, position, updated_at
+     FROM reading_progress WHERE novel_id = $1`,
+    [novelId],
+  );
+  return result.rows[0];
+}
+
+export async function saveReadingProgress(
+  novelId: string,
+  data: { chapterId?: string; position: Record<string, unknown> },
+) {
+  const result = await pool.query(
+    `INSERT INTO reading_progress (novel_id, chapter_id, position)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (novel_id) DO UPDATE SET
+       chapter_id = EXCLUDED.chapter_id,
+       position = EXCLUDED.position,
+       updated_at = NOW()
+     RETURNING novel_id, chapter_id, position, updated_at`,
+    [novelId, data.chapterId || null, data.position],
+  );
   return result.rows[0];
 }
